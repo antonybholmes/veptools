@@ -4,11 +4,105 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font
 
+SEP = "|"
+NA = "."
+
 # optional: enforce specific column types
 dtype_map = {
     "VEP_Gene_Symbol": "string",
     "Hugo_Symbol (Rahul - not really Hugo)": "string",
 }
+
+
+def load_hugo(file: str) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+
+    df_hugo = pd.read_csv(
+        file,
+        sep="\t",
+        header=0,
+        keep_default_na=False,
+    )
+
+    gene_lookup_map = {}
+    previous_gene_lookup_map = {}
+    alias_gene_lookup_map = {}
+
+    for i, row in df_hugo.iterrows():
+        hugo_id = row["HGNC ID"]
+        gene_symbol = row["Approved symbol"]
+        refseqs = (
+            [x.strip() for x in row["RefSeq IDs"].split(",")]
+            if row["RefSeq IDs"]
+            else []
+        )
+        ensembl_ids = (
+            [x.strip() for x in row["Ensembl gene ID"].split(",")]
+            if row["Ensembl gene ID"]
+            else []
+        )
+
+        gene_lookup_map[hugo_id.lower()] = gene_symbol
+        gene_lookup_map[gene_symbol.lower()] = gene_symbol
+        for refseq in refseqs:
+            gene_lookup_map[refseq.lower()] = gene_symbol
+        for ensembl_id in ensembl_ids:
+            gene_lookup_map[ensembl_id.lower()] = gene_symbol
+
+        previous_symbols = (
+            [x.strip() for x in row["Previous symbols"].split(",")]
+            if row["Previous symbols"]
+            else []
+        )
+        for prev in previous_symbols:
+            previous_gene_lookup_map[prev.lower()] = gene_symbol
+
+        alias_symbols = (
+            [x.strip() for x in row["Alias symbols"].split(",")]
+            if row["Alias symbols"]
+            else []
+        )
+        for alias in alias_symbols:
+            alias_gene_lookup_map[alias.lower()] = gene_symbol
+
+    return gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map
+
+
+def load_ccds(file: str) -> dict[str, dict]:
+    df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
+
+    ccds_map = {}
+
+    for i, row in df.iterrows():
+        gene_id = row["gene_id"]
+        gene_symbol = row["gene_symbol"]
+        transcript_id = row["transcript_id"]
+        appris = row["appris"]
+        ccds = row["ccds"]
+
+        ccds_map[transcript_id] = {
+            "gene_id": gene_id,
+            "gene_symbol": gene_symbol,
+            "appris": appris,
+            "ccds": ccds if ccds != "" else NA,
+        }
+
+    return ccds_map
+
+
+def load_ccds_lengths(file: str) -> dict[str, dict]:
+    df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
+
+    ccds_length_map = {}
+
+    for i, row in df.iterrows():
+        ccds = row["ccds_id"]
+        aa_length = row["aa_length"]
+
+        ccds_length_map[ccds] = {
+            "aa_length": aa_length,
+        }
+
+    return ccds_length_map
 
 
 def maf_to_excel(df, fout):

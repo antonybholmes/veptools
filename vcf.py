@@ -9,6 +9,13 @@ ASSEMBLY = "hg19"
 ASSEMBLY_DIR = "/ifs/archive/cancer/Lab_RDF/scratch_Lab_RDF/ngs/dna/hg19"
 
 
+def chr_to_int(ch):
+    ch = ch.replace("chr", "")
+    if ch.isdigit():
+        return int(ch)
+    return {"X": 23, "Y": 24, "MT": 25}.get(ch, 100)
+
+
 class VCFMaker:
     def __init__(self, assembly: str = "hg19", id_mode: str = "vep_id"):
         self.dna = libdna.DNA4Bit(ASSEMBLY_DIR)
@@ -102,105 +109,108 @@ class VCFMaker:
         )
 
     def split_by_sample(self, df, dir: str = "output", write_header: bool = True):
-        df = df.sort_values(by=["Chromosome", "Start_Position"])
+        df["chr_order"] = df["Chromosome"].map(chr_to_int)
+
+        df = df.sort_values(by=["Tumor_Sample_Barcode", "chr_order", "Start_Position"])
 
         # write VCF
 
-        used = set()
-        skips = 0
-
         os.makedirs(dir, exist_ok=True)
-
-        samples = df["Tumor_Sample_Barcode"].unique()
 
         print("total", df.shape[0])
 
         total = 0
+        current_sample = None
+        f = None
 
-        for sample in samples:
-            df_sample = df[df["Tumor_Sample_Barcode"] == sample]
+        dna_lookup = {}
 
-            total += df_sample.shape[0]
+        # make header
+        header = "##fileformat=VCFv4.2"
+        header += '\n##INFO=<ID=ID,Number=1,Type=String,Description="Sample Id">'
 
-            fout = os.path.join(dir, f"{sample}.vcf")
+        for r in self.sizes:
+            header += f"\n##contig=<ID={r['chr']},length={r['size']}>"
+        header += "\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
 
-            with open(fout, "w") as f:
+        for i, (index, row) in enumerate(df.iterrows()):
+            sample = row["Tumor_Sample_Barcode"]
+
+            if sample != current_sample:
+                print(f"Processing sample {sample} at row {i}, total samples {total}")
+
+                if f is not None:
+                    f.close()
+
+                fout = os.path.join(dir, f"{sample}.vcf")
+                f = open(fout, "w")
+
+                current_sample = sample
+                total += 1
+
                 # header
                 if write_header:
-                    print("##fileformat=VCFv4.2", file=f)
-                    print(
-                        '##INFO=<ID=VEP_ID,Number=1,Type=String,Description="VEP Identifier">',
-                        file=f,
-                    )
+                    print(header, file=f)
 
-                    for r in self.sizes:
-                        print(f"##contig=<ID={r['chr']},length={r['size']}>", file=f)
+            chrom = row["Chromosome"]
+            pos = row["Start_Position"]
+            ref = row["Reference_Allele"]
+            alt = row["Tumor_Seq_Allele2"]
 
-                    print("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO", file=f)
+            new_ref = ref
+            new_alt = alt
+            new_pos = pos
 
-                for i, row in df_sample.iterrows():
-                    chrom = row["Chromosome"]
-                    pos = row["Start_Position"]
-                    # default to same as original
-                    id = "."
-                    ref = row["Reference_Allele"]
-                    alt = row["Tumor_Seq_Allele2"]
-                    sample = "."
+            # need to fix for insertions and deletions
 
-                    if "Tumor_Sample_Barcode" in row:
-                        sample = row["Tumor_Sample_Barcode"]
-                    elif "Sample" in row:
-                        sample = row["Sample"]
-                    else:
-                        sample = "."
+            if ref == "-":
+                # insertion we need to add base before
 
-                    new_ref = ref
-                    new_alt = alt
-                    new_pos = pos
+                key = f"{chrom}:{pos}"
 
-                    # need to fix for insertions and deletions
+                if key not in dna_lookup:
+                    loc = gal.genomic.Location(chrom, pos, pos)
+                    base = self.dna.dna(loc).upper()
+                    dna_lookup[key] = base
 
-                    if ref == "-":
-                        # insertion we need to add base before
-                        loc = gal.genomic.Location(chrom, pos, pos)
-                        base = self.dna.dna(loc).upper()
+                base = dna_lookup[key]  # gal.genomic.Location(chrom, pos, pos)
+                # base = self.dna.dna(loc).upper()
 
-                        # print(loc, base)
+                # print(loc, base)
 
-                        new_ref = base
-                        new_alt = base + alt
+                new_ref = base
+                new_alt = base + alt
+            elif alt == "-":
+                # deletion we need to report base before
+                new_pos = pos - 1
 
-                    if alt == "-":
-                        # deletion we need to report base before
-                        new_pos = pos - 1
+                key = f"{chrom}:{new_pos}"
 
-                        loc = gal.genomic.Location(chrom, new_pos, new_pos)
-                        base = self.dna.dna(loc).upper()
+                if key not in dna_lookup:
+                    loc = gal.genomic.Location(chrom, new_pos, new_pos)
+                    base = self.dna.dna(loc).upper()
+                    dna_lookup[key] = base
 
-                        new_alt = base
-                        new_ref = base + ref
+                base = dna_lookup[key]
 
-                    # make a VEP id to track
-                    if self.id_mode == "vep_id":
-                        id = f"{chrom}_{pos+1 if ref == '-' else pos}_{ref}/{alt}"
+                new_alt = base
+                new_ref = base + ref
+            else:
+                # snv
+                pass
 
-                        # in vep_id mode we skip
-                        if id in used:
-                            # print(f"Duplicate variant {id} at row {i}, skipping")
-                            skips += 1
-                            continue
-                    else:
-                        id = sample
+            print(
+                f"{chrom}\t{new_pos}\t{sample}\t{new_ref}\t{new_alt}\t.\tPASS\tID={sample}",
+                file=f,
+            )
 
-                    print(
-                        f"{chrom}\t{new_pos}\t{id}\t{new_ref}\t{new_alt}\t.\tPASS\tID={id}",
-                        file=f,
-                    )
-
-                    used.add(id)
+            if i % 100000 == 0:
+                print(
+                    f"Processed {i} rows, current sample {sample}, total samples {total}"
+                )
 
         print(
-            f"Finished writing VCF with {len(used)} variants, skipped {skips} duplicates"
+            f"Finished writing VCF with {total} samples, total variants {df.shape[0]}"
         )
 
         print("running", total)
