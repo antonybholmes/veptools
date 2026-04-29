@@ -15,6 +15,9 @@ dtype_map = {
 
 
 def load_hugo(file: str) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """
+    Load HUGO gene symbol mapping from HGNC complete set file
+    """
 
     df_hugo = pd.read_csv(
         file,
@@ -27,7 +30,7 @@ def load_hugo(file: str) -> tuple[dict[str, str], dict[str, str], dict[str, str]
     previous_gene_lookup_map = {}
     alias_gene_lookup_map = {}
 
-    for i, row in df_hugo.iterrows():
+    for _, row in df_hugo.iterrows():
         hugo_id = row["HGNC ID"]
         gene_symbol = row["Approved symbol"]
         refseqs = (
@@ -91,6 +94,12 @@ def load_ccds(file: str) -> dict[str, dict]:
 
 
 def load_ccds_lengths(file: str) -> dict[str, dict]:
+    """
+    Load CCDS lengths from file from NCBI CCDS project,
+    using the protein lengths so we don't need to calculate
+    from genomic coordinates and exon structures,
+    which can be error prone using divide by 3
+    """
     df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
 
     ccds_length_map = {}
