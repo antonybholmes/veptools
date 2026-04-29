@@ -72,12 +72,13 @@ def load_ccds(file: str) -> dict[str, dict]:
 
     ccds_map = {}
 
-    for i, row in df.iterrows():
+    for _, row in df.iterrows():
         gene_id = row["gene_id"]
         gene_symbol = row["gene_symbol"]
         transcript_id = row["transcript_id"]
         appris = row["appris"]
-        ccds = row["ccds"]
+        # strip version from ccds_id if exists
+        ccds = row["ccds"].split(".")[0]
 
         ccds_map[transcript_id] = {
             "gene_id": gene_id,
@@ -94,8 +95,9 @@ def load_ccds_lengths(file: str) -> dict[str, dict]:
 
     ccds_length_map = {}
 
-    for i, row in df.iterrows():
-        ccds = row["ccds_id"]
+    for _, row in df.iterrows():
+        # strip version from ccds_id if exists
+        ccds = row["ccds_id"].split(".")[0]
         aa_length = row["aa_length"]
 
         ccds_length_map[ccds] = {

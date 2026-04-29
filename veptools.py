@@ -597,7 +597,7 @@ def decode_hgvs(encoded_str: str) -> str:
 
 
 def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
-    # check if str is int, if so return int, otherwise return NA if blank, otherwise return origiNAl string
+    # check if str is int, if so return int, otherwise return NA if blank, otherwise return original string
 
     if isinstance(v, bool):
         return int(v)
