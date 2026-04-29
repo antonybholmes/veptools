@@ -452,6 +452,7 @@ class VEPAnnotation:
             df["VEP_Total_Exons"] = NA
             df["VEP_Is_Canonical"] = NA
             df["CCDS"] = NA
+            df["CCDS_Length_AA"] = NA
             df["MANE_RefSeq"] = NA
             df["MANE_status"] = NA
 
@@ -467,6 +468,7 @@ class VEPAnnotation:
             df["VEP_Secondary_Total_Exons"] = NA
             df["VEP_Secondary_Canonical"] = NA
             df["Secondary_CCDS"] = NA
+            df["Secondary_CCDS_Length_AA"] = NA
             df["VEP_Annotation_Database"] = VEP_VERSION
 
             for i, row in df.iterrows():
@@ -483,8 +485,8 @@ class VEPAnnotation:
                 # if primary annotation exists, add it, otherwise add secondary annotations concateNAted with SEP
                 if len(annotations) > 0:
                     annotation = annotations[0]
-
-                    transcript = annotation["transcript_id"]
+                    transcript_id = annotation["transcript_id"]
+                    ccds = self.ccds_map.get(transcript_id, {}).get("ccds", NA)
 
                     df.at[i, "VEP_Gene_ID"] = annotation["gene_id"]
                     df.at[i, "VEP_Gene_Symbol"] = annotation["symbol"]
@@ -496,12 +498,15 @@ class VEPAnnotation:
                     df.at[i, "VEP_HGVSc"] = annotation["hgvsc"]
                     df.at[i, "VEP_Variant_Classification"] = annotation["consequence"]
                     df.at[i, "VEP_Variant_Severity"] = annotation["severity"]
-                    df.at[i, "VEP_Transcript"] = transcript
+                    df.at[i, "VEP_Transcript"] = transcript_id
                     df.at[i, "VEP_Exon"] = annotation["exon"]
                     df.at[i, "VEP_Total_Exons"] = annotation["exons"]
                     df.at[i, "VEP_Is_Canonical"] = int(annotation["is_canonical"])
-                    df.at[i, "CCDS"] = self.ccds_map.get(transcript, {}).get("ccds", NA)
-                    mane_info = self.mane_map.get(transcript, None)
+                    df.at[i, "CCDS"] = ccds
+                    df.at[i, "CCDS_Length_AA"] = self.ccds_length_map.get(ccds, {}).get(
+                        "length_aa", NA
+                    )
+                    mane_info = self.mane_map.get(transcript_id, None)
                     if mane_info:
                         df.at[i, "MANE_RefSeq"] = mane_info["refseq"]
                         df.at[i, "MANE_status"] = mane_info["status"]
@@ -523,12 +528,10 @@ class VEPAnnotation:
                     gene_ids = SEP.join([a["gene_id"] for a in annotations])
                     gene_symbols = SEP.join([a["symbol"] for a in annotations])
                     transcript_ids = SEP.join([a["transcript_id"] for a in annotations])
-                    ccdss = SEP.join(
-                        [
-                            self.ccds_map.get(a["transcript_id"], {}).get("ccds", NA)
-                            for a in annotations
-                        ]
-                    )
+                    ccdss = [
+                        self.ccds_map.get(a["transcript_id"], {}).get("ccds", NA)
+                        for a in annotations
+                    ]
 
                     exons = SEP.join([str(a["exon"]) for a in annotations])
                     exons_total = SEP.join([str(a["exons"]) for a in annotations])
@@ -549,7 +552,13 @@ class VEPAnnotation:
                     df.at[i, "VEP_Secondary_Exon"] = exons
                     df.at[i, "VEP_Secondary_Total_Exons"] = exons_total
                     df.at[i, "VEP_Secondary_Canonical"] = is_canonical
-                    df.at[i, "Secondary_CCDS"] = ccdss
+                    df.at[i, "Secondary_CCDS"] = SEP.join(ccdss)
+                    df.at[i, "Secondary_CCDS_Length_AA"] = SEP.join(
+                        [
+                            str(self.ccds_length_map.get(ccds, {}).get("length_aa", NA))
+                            for ccds in ccdss
+                        ]
+                    )
 
             df.to_csv(
                 fout,
