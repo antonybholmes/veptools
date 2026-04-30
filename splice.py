@@ -11,9 +11,10 @@ import sqlite3
 
 import numpy as np
 import pandas as pd
+from .utils import SEP, NA
 
 BASES_FROM_CDS_STILL_CONSIDERED_SPLICE = 2
-SEP = "|"
+
 
 SPLICE_PROTEIN_CHANGE_COL = "Splice_Protein_Change (AH)"
 SPLICE_TRANSCRIPT_COL = "Splice_Transcript_Type (1=exact, 2=canonical, 3=longest)"
@@ -479,21 +480,21 @@ class SpliceAnnotator:
             print(f"Processing chunk {chunk}...")
             chunk += 1
 
-            df[SPLICE_PROTEIN_CHANGE_COL] = ""
-            df["Splice_Transcript_ID"] = ""
+            df[SPLICE_PROTEIN_CHANGE_COL] = NA
+            df["Splice_Transcript_ID"] = NA
 
             idx = np.where(df.columns == "Splice_Transcript_ID")[0][0]
-            df.insert(idx + 1, SPLICE_TRANSCRIPT_COL, "")
+            df.insert(idx + 1, SPLICE_TRANSCRIPT_COL, NA)
 
             # df["Splice_Nearest_AA_Position"] = ""
-            df["Splice_Nearest_Exon_Number"] = ""
+            df["Splice_Nearest_Exon_Number"] = NA
 
             # find index of Splice_Nearest_Exon column
             if "Splice_Nearest_Exon_Dist_bp" not in df.columns:
                 idx = np.where(df.columns == "Splice_Nearest_Exon_Number")[0][0]
-                df.insert(idx + 1, "Splice_Nearest_Exon_Dist_bp", "")
+                df.insert(idx + 1, "Splice_Nearest_Exon_Dist_bp", NA)
 
-            df[STRICT_SPLICE_COL] = ""
+            df[STRICT_SPLICE_COL] = NA
 
             df["Splice_Annotation_Database"] = self.metadata["version"]
 

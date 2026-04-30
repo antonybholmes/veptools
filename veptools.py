@@ -199,10 +199,10 @@ def parse_csq_with_severity(
             alias_gene_lookup_map,
         )
 
-        transcript_info["is_canonical"] = is_canonical
-        transcript_info["is_hugo_gene"] = is_hugo_gene
-        transcript_info["is_protein_coding"] = is_protein_coding
-        transcript_info["has_protein_change"] = has_protein_change
+        transcript_info["is_canonical"] = blank_val(is_canonical)
+        transcript_info["is_hugo_gene"] = blank_val(is_hugo_gene)
+        transcript_info["is_protein_coding"] = blank_val(is_protein_coding)
+        transcript_info["has_protein_change"] = blank_val(has_protein_change)
         transcript_info["severity_rank"] = consequence
 
         results.append(transcript_info)
@@ -306,16 +306,21 @@ class VEPAnnotation:
                 for transcript in transcripts:
                     transcript_id = transcript.get("Feature", NA)
 
-                    gencode_is_canonical = self.transcript_map.get(
-                        transcript_id, {}
-                    ).get("is_canonical", 0)
+                    gencode_info = self.transcript_map.get(transcript_id, {})
+
+                    transcript["exons"] = gencode_info.get("exons", NA)
+
+                    gencode_is_canonical = gencode_info.get("is_canonical", 0)
 
                     # now VEP or GENCODE decide if canonical
                     if gencode_is_canonical:
-                        transcript["is_canonical"] = gencode_is_canonical
+                        transcript["is_canonical"] = 1
 
-                    ccds = self.transcript_map.get(transcript_id, {}).get("ccds", NA)
+                    ccds = gencode_info.get("ccds", NA)
                     transcript["ccds"] = ccds
+
+                    # we don't use na here as we need to sort by this so
+                    # cannot intermix strings and ints
                     transcript["ccds_aa_length"] = self.ccds_length_map.get(
                         ccds, {}
                     ).get("aa_length", -1)
@@ -361,15 +366,15 @@ class VEPAnnotation:
                 for ti, transcript in enumerate(transcripts):
                     transcript_id = transcript.get("Feature", NA)
                     biotype = transcript.get("BIOTYPE", NA)
-                    is_protein_coding = "protein_coding" in biotype
-                    exon = transcript.get("EXON", NA)
+                    is_protein_coding = 1 if "protein_coding" in biotype else 0
+                    vep_exon_info = transcript.get("EXON", NA)
                     exon_num = NA
-                    exon_total = NA
+                    exon_total = transcript.get("exons", NA)
                     consequences = SEP.join(
                         transcript.get("Consequence", NA).split("&")
                     )
-                    is_canonical = transcript.get("is_canonical", False)
-                    is_hugo_gene = transcript.get("is_hugo_gene", False)
+                    is_canonical = transcript.get("is_canonical", NA)
+                    is_hugo_gene = transcript.get("is_hugo_gene", NA)
                     symbol = transcript.get("SYMBOL", NA)
                     gene_id = transcript.get("Gene", NA)
 
@@ -380,8 +385,10 @@ class VEPAnnotation:
                         self.alias_gene_lookup_map,
                     )
 
-                    if exon != NA and "/" in exon:
-                        exon_num, exon_total = exon.split("/")
+                    if vep_exon_info != NA and "/" in vep_exon_info:
+                        # become strings but will be
+                        # turned into nums by blank_val
+                        exon_num, exon_total = vep_exon_info.split("/")
 
                     annotation = {
                         "gene_id": blank_val(gene_id),
@@ -426,12 +433,12 @@ class VEPAnnotation:
                         if ":" in hgvsps:
                             hgvsps = hgvsps.split(":")[1]
 
-                        lprotein = hgvsps.lower()
+                        protein_lc = hgvsps.lower()
 
                         for three, one in AA_THREE_TO_ONE_MAP.items():
-                            lprotein = lprotein.replace(three, one)
+                            protein_lc = protein_lc.replace(three, one)
 
-                        annotation["hgvsp"] = blank_val(lprotein)
+                        annotation["hgvsp"] = blank_val(protein_lc)
                         annotation["hgvsc"] = blank_val(hgvscs)
 
                     # mode = 0 if ti == 0 and is_hugo_gene and is_protein_coding else 1
@@ -507,7 +514,6 @@ class VEPAnnotation:
             for i, row in df.iterrows():
                 chrom = row["Chromosome"]
                 start = row["Start_Position"]
-                end = row["End_Position"]
                 ref = row["Reference_Allele"]
                 alt = row["Tumor_Seq_Allele2"]
 
@@ -585,7 +591,7 @@ class VEPAnnotation:
                     df.at[i, "Secondary_CCDS"] = SEP.join(ccdss)
                     df.at[i, "Secondary_CCDS_AA_Length"] = SEP.join(
                         [
-                            str(self.transcript_map.get(ccds, {}).get("aa_length", NA))
+                            str(self.transcript_map.get(ccds, {}).get("aa_length", -1))
                             for ccds in ccdss
                         ]
                     )
