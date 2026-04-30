@@ -306,7 +306,6 @@ class VEPAnnotation:
                 for transcript in transcripts:
                     transcript_id = transcript.get("Feature", NA)
 
-                    # override VEP is canonical and use GENCODE
                     gencode_is_canonical = self.transcript_map.get(
                         transcript_id, {}
                     ).get("is_canonical", 0)
