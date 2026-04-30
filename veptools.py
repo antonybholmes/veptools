@@ -9,8 +9,8 @@ from .utils import load_hugo, load_transcripts, NA, SEP
 import pandas as pd
 
 VEP_VERSION = "Ensembl_VEP_115"
-HUGO_PATH = Path(__file__).parent / "hugo_approved_20260409.tsv"
-MANE_PATH = Path(__file__).parent / "MANE.GRCh38.v1.5.summary.txt"
+HUGO_PATH = Path(__file__).parent / "res" / "hugo_approved_20260409.tsv"
+MANE_PATH = Path(__file__).parent / "res" / "grch38" / "MANE.GRCh38.v1.5.summary.txt"
 
 
 # https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html?redirect=no
@@ -517,7 +517,6 @@ class VEPAnnotation:
                 if len(annotations) > 0:
                     annotation = annotations[0]
                     transcript_id = annotation["transcript_id"]
-                    ccds = self.ccds_map.get(transcript_id, {}).get("ccds", NA)
 
                     df.at[i, "VEP_Gene_ID"] = annotation["gene_id"]
                     df.at[i, "VEP_Gene_Symbol"] = annotation["symbol"]
@@ -533,7 +532,7 @@ class VEPAnnotation:
                     df.at[i, "VEP_Exon"] = annotation["exon"]
                     df.at[i, "VEP_Total_Exons"] = annotation["exons"]
                     df.at[i, "VEP_Is_Canonical"] = int(annotation["is_canonical"])
-                    df.at[i, "CCDS"] = ccds
+                    df.at[i, "CCDS"] = annotation["ccds"]
                     df.at[i, "CCDS_AA_Length"] = annotation["ccds_aa_length"]
                     mane_info = self.mane_map.get(transcript_id, None)
                     if mane_info:
@@ -558,7 +557,7 @@ class VEPAnnotation:
                     gene_symbols = SEP.join([a["symbol"] for a in annotations])
                     transcript_ids = SEP.join([a["transcript_id"] for a in annotations])
                     ccdss = [
-                        self.ccds_map.get(a["transcript_id"], {}).get("ccds", NA)
+                        self.transcript_map.get(a["transcript_id"], {}).get("ccds", NA)
                         for a in annotations
                     ]
 
