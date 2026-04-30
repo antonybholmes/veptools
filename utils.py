@@ -70,10 +70,14 @@ def load_hugo(file: str) -> tuple[dict[str, str], dict[str, str], dict[str, str]
     return gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map
 
 
-def load_ccds(file: str) -> dict[str, dict]:
+def load_transcripts(file: str) -> dict[str, dict]:
+    """
+    Load transcript mapping from GENCODE basic transcript file
+    """
+
     df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
 
-    ccds_map = {}
+    transcript_map = {}
 
     for _, row in df.iterrows():
         gene_id = row["gene_id"]
@@ -82,40 +86,42 @@ def load_ccds(file: str) -> dict[str, dict]:
         appris = row["appris"]
         # strip version from ccds_id if exists
         ccds = row["ccds"].split(".")[0]
+        is_canonical = row["is_canonical"]
 
-        ccds_map[transcript_id] = {
+        transcript_map[transcript_id] = {
             "gene_id": gene_id,
             "gene_symbol": gene_symbol,
-            "appris": appris,
+            "appris": appris if appris != "" else NA,
             "ccds": ccds if ccds != "" else NA,
+            "is_canonical": is_canonical,
         }
 
-    return ccds_map
+    return transcript_map
 
 
-def load_ccds_lengths(file: str) -> dict[str, dict]:
-    """
-    Load CCDS lengths from file from NCBI CCDS project,
-    using the protein lengths so we don't need to calculate
-    from genomic coordinates and exon structures,
-    which can be error prone using divide by 3
-    """
-    df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
+# def load_ccds_lengths(file: str) -> dict[str, dict]:
+#     """
+#     Load CCDS lengths from file from NCBI CCDS project,
+#     using the protein lengths so we don't need to calculate
+#     from genomic coordinates and exon structures,
+#     which can be error prone using divide by 3
+#     """
+#     df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
 
-    ccds_length_map = {}
+#     ccds_length_map = {}
 
-    for _, row in df.iterrows():
-        # strip version from ccds_id if exists
-        ccds = row["ccds_id"].split(".")[0]
-        aa_length = row["aa_length"]
+#     for _, row in df.iterrows():
+#         # strip version from ccds_id if exists
+#         ccds = row["ccds_id"].split(".")[0]
+#         aa_length = row["aa_length"]
 
-        ccds_length_map[ccds] = {
-            "aa_length": aa_length,
-        }
+#         ccds_length_map[ccds] = {
+#             "aa_length": aa_length,
+#         }
 
-    # print(ccds_length_map)
+#     # print(ccds_length_map)
 
-    return ccds_length_map
+#     return ccds_length_map
 
 
 def maf_to_excel(df, fout):

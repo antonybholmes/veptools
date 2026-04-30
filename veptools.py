@@ -4,7 +4,7 @@ from logging import info
 from pathlib import Path
 from typing import Union
 from urllib.parse import unquote
-from .utils import load_hugo, load_ccds, load_ccds_lengths, NA, SEP
+from .utils import load_hugo, load_transcripts, NA, SEP
 
 import pandas as pd
 
@@ -260,8 +260,8 @@ class VEPAnnotation:
             self.alias_gene_lookup_map,
         ) = load_hugo(str(HUGO_PATH))
 
-        self.ccds_map = load_ccds_map(assembly)
-        self.ccds_length_map = load_ccds_length_map()
+        self.transcript_map = load_transcript_map(assembly)
+        # self.ccds_length_map = load_ccds_length_map()
         self.mane_map = load_mane_map()
 
         self.annotation_map = None
@@ -306,11 +306,16 @@ class VEPAnnotation:
                 for transcript in transcripts:
                     transcript_id = transcript.get("Feature", NA)
 
-                    transcript["ccds"] = self.ccds_map.get(transcript_id, {}).get(
+                    # override VEP is canonical and use GENCODE
+                    transcript["is_canonical"] = self.transcript_map.get(
+                        transcript_id, {}
+                    ).get("is_canonical", 0)
+
+                    transcript["ccds"] = self.transcript_map.get(transcript_id, {}).get(
                         "ccds", NA
                     )
-                    transcript["ccds_aa_length"] = self.ccds_length_map.get(
-                        transcript["ccds"], {}
+                    transcript["ccds_aa_length"] = self.transcript_map.get(
+                        transcript_id, {}
                     ).get("aa_length", -1)
 
                     # if transcript["ccds"] != NA:
@@ -579,7 +584,7 @@ class VEPAnnotation:
                     df.at[i, "Secondary_CCDS"] = SEP.join(ccdss)
                     df.at[i, "Secondary_CCDS_AA_Length"] = SEP.join(
                         [
-                            str(self.ccds_length_map.get(ccds, {}).get("aa_length", NA))
+                            str(self.transcript_map.get(ccds, {}).get("aa_length", NA))
                             for ccds in ccdss
                         ]
                     )
@@ -648,7 +653,7 @@ def load_gene_lookup_maps() -> tuple[dict[str, str], dict[str, str], dict[str, s
     return gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map
 
 
-def load_ccds_map(assembly: str = "hg19") -> dict[str, dict]:
+def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
     """
     Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
     """
@@ -657,34 +662,34 @@ def load_ccds_map(assembly: str = "hg19") -> dict[str, dict]:
             Path(__file__).parent
             / "res"
             / assembly
-            / f"gencode.v49.basic.annotation.appris_ccds.tsv"
+            / "gencode_v48_basic_transcripts.tsv"
         )
     else:
         path = (
             Path(__file__).parent
             / "res"
             / assembly
-            / "gencode.v49lift37.basic.annotation.appris_ccds.tsv"
+            / "gencode_v48lift37_basic_transcripts.tsv"
         )
 
     print(f"Loading CCDS map from {path}...")
 
-    ccds_map = load_ccds(str(path))
+    transcript_map = load_transcripts(str(path))
 
-    return ccds_map
+    return transcript_map
 
 
-def load_ccds_length_map() -> dict[str, dict]:
-    """
-    Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
-    """
-    path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
+# def load_ccds_length_map() -> dict[str, dict]:
+#     """
+#     Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
+#     """
+#     path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
 
-    print(f"Loading CCDS length map from {path}...")
+#     print(f"Loading CCDS length map from {path}...")
 
-    ccds_length_map = load_ccds_lengths(str(path))
+#     ccds_length_map = load_ccds_lengths(str(path))
 
-    return ccds_length_map
+#     return ccds_length_map
 
 
 def load_mane_map():
