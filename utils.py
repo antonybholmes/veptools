@@ -113,6 +113,8 @@ def load_ccds_lengths(file: str) -> dict[str, dict]:
             "aa_length": aa_length,
         }
 
+    # print(ccds_length_map)
+
     return ccds_length_map
 
 
@@ -152,7 +154,7 @@ def chr_sizes(assembly: str = "hg19"):
     )
 
     sizes = [
-        {"chr": row["chrom"], "size": row["size"]} for i, row in df_sizes.iterrows()
+        {"chr": row["chrom"], "size": row["size"]} for _, row in df_sizes.iterrows()
     ]
 
     return sizes

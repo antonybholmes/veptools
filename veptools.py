@@ -309,6 +309,16 @@ class VEPAnnotation:
                     transcript["ccds"] = self.ccds_map.get(transcript_id, {}).get(
                         "ccds", NA
                     )
+                    transcript["ccds_aa_length"] = self.ccds_length_map.get(
+                        transcript["ccds"], {}
+                    ).get("aa_length", -1)
+
+                    # if transcript["ccds"] != NA:
+                    #     print(
+                    #         f"Transcript {transcript_id} has CCDS {transcript['ccds']} with AA length {transcript['ccds_aa_length']}"
+                    #     )
+                    #     exit(0)
+
                     transcript["has_ccds"] = int(transcript["ccds"] != NA)
                     transcript["has_mane"] = 0
                     transcript["mane_refseq"] = NA
@@ -322,18 +332,26 @@ class VEPAnnotation:
                 # sort by which we think might be priority
                 transcripts.sort(
                     key=lambda t: (
-                        not t["is_hugo_gene"],
-                        not t["is_protein_coding"],
-                        not t["has_mane"],
-                        not t["has_ccds"],
-                        not t["is_canonical"],
+                        # protein changes should come first
                         not t["has_protein_change"],
+                        # pick the one with most severe consequence
                         t["severity_rank"],
+                        # if has hugo symbol, more likely to be primary
+                        not t["is_hugo_gene"],
+                        # if protein coding, more likely to be primary
+                        not t["is_protein_coding"],
+                        # if has ccds, more likely to be primary
+                        not t["has_ccds"],
+                        # if has mane, more likely to be primary
+                        not t["has_mane"],
+                        # if canonical, more likely to be primary
+                        not t["is_canonical"],
+                        # if nothing else try longest CCDS length, as a proxy for most complete transcript
+                        -t["ccds_aa_length"],
                     )
                 )
 
                 for ti, transcript in enumerate(transcripts):
-
                     transcript_id = transcript.get("Feature", NA)
                     biotype = transcript.get("BIOTYPE", NA)
                     is_protein_coding = "protein_coding" in biotype
@@ -373,9 +391,15 @@ class VEPAnnotation:
                         "hgvsp": NA,
                         "hgvsc": NA,
                         "ccds": transcript.get("ccds", NA),
+                        "ccds_aa_length": transcript.get("ccds_aa_length", NA),
                         "mane_refseq": transcript.get("mane_refseq", NA),
                         "mane_status": transcript.get("mane_status", NA),
                     }
+
+                    # if transcript_id == "ENST00000332831":
+                    #     print(
+                    #         f"Found transcript ENST00000332831 with annotation: {annotation}"
+                    #     )
 
                     if is_protein_coding:
                         # matcher = re.search(r":(c\..+)", info[10])
@@ -403,7 +427,9 @@ class VEPAnnotation:
                         annotation["hgvsp"] = blank_val(lprotein)
                         annotation["hgvsc"] = blank_val(hgvscs)
 
-                    mode = 0 if ti == 0 and is_hugo_gene and is_protein_coding else 1
+                    # mode = 0 if ti == 0 and is_hugo_gene and is_protein_coding else 1
+                    # first item wins primary annotation
+                    mode = 0 if ti == 0 else 1
 
                     self.annotation_map[vep_id][mode].append(annotation)
             # break
@@ -452,7 +478,7 @@ class VEPAnnotation:
             df["VEP_Total_Exons"] = NA
             df["VEP_Is_Canonical"] = NA
             df["CCDS"] = NA
-            df["CCDS_Length_AA"] = NA
+            df["CCDS_AA_Length"] = NA
             df["MANE_RefSeq"] = NA
             df["MANE_status"] = NA
 
@@ -468,7 +494,7 @@ class VEPAnnotation:
             df["VEP_Secondary_Total_Exons"] = NA
             df["VEP_Secondary_Canonical"] = NA
             df["Secondary_CCDS"] = NA
-            df["Secondary_CCDS_Length_AA"] = NA
+            df["Secondary_CCDS_AA_Length"] = NA
             df["VEP_Annotation_Database"] = VEP_VERSION
 
             for i, row in df.iterrows():
@@ -503,9 +529,7 @@ class VEPAnnotation:
                     df.at[i, "VEP_Total_Exons"] = annotation["exons"]
                     df.at[i, "VEP_Is_Canonical"] = int(annotation["is_canonical"])
                     df.at[i, "CCDS"] = ccds
-                    df.at[i, "CCDS_Length_AA"] = self.ccds_length_map.get(ccds, {}).get(
-                        "length_aa", NA
-                    )
+                    df.at[i, "CCDS_AA_Length"] = annotation["ccds_aa_length"]
                     mane_info = self.mane_map.get(transcript_id, None)
                     if mane_info:
                         df.at[i, "MANE_RefSeq"] = mane_info["refseq"]
@@ -553,9 +577,9 @@ class VEPAnnotation:
                     df.at[i, "VEP_Secondary_Total_Exons"] = exons_total
                     df.at[i, "VEP_Secondary_Canonical"] = is_canonical
                     df.at[i, "Secondary_CCDS"] = SEP.join(ccdss)
-                    df.at[i, "Secondary_CCDS_Length_AA"] = SEP.join(
+                    df.at[i, "Secondary_CCDS_AA_Length"] = SEP.join(
                         [
-                            str(self.ccds_length_map.get(ccds, {}).get("length_aa", NA))
+                            str(self.ccds_length_map.get(ccds, {}).get("aa_length", NA))
                             for ccds in ccdss
                         ]
                     )
