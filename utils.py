@@ -99,29 +99,29 @@ def load_transcripts(file: str) -> dict[str, dict]:
     return transcript_map
 
 
-# def load_ccds_lengths(file: str) -> dict[str, dict]:
-#     """
-#     Load CCDS lengths from file from NCBI CCDS project,
-#     using the protein lengths so we don't need to calculate
-#     from genomic coordinates and exon structures,
-#     which can be error prone using divide by 3
-#     """
-#     df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
+def load_ccds_lengths(file: str) -> dict[str, dict]:
+    """
+    Load CCDS lengths from file from NCBI CCDS project,
+    using the protein lengths so we don't need to calculate
+    from genomic coordinates and exon structures,
+    which can be error prone using divide by 3
+    """
+    df = pd.read_csv(file, sep="\t", header=0, keep_default_na=False)
 
-#     ccds_length_map = {}
+    ccds_length_map = {}
 
-#     for _, row in df.iterrows():
-#         # strip version from ccds_id if exists
-#         ccds = row["ccds_id"].split(".")[0]
-#         aa_length = row["aa_length"]
+    for _, row in df.iterrows():
+        # strip version from ccds_id if exists
+        ccds = row["ccds_id"].split(".")[0]
+        aa_length = row["aa_length"]
 
-#         ccds_length_map[ccds] = {
-#             "aa_length": aa_length,
-#         }
+        ccds_length_map[ccds] = {
+            "aa_length": aa_length,
+        }
 
-#     # print(ccds_length_map)
+    # print(ccds_length_map)
 
-#     return ccds_length_map
+    return ccds_length_map
 
 
 def maf_to_excel(df, fout):

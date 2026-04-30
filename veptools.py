@@ -4,7 +4,7 @@ from logging import info
 from pathlib import Path
 from typing import Union
 from urllib.parse import unquote
-from .utils import load_hugo, load_transcripts, NA, SEP
+from .utils import load_hugo, load_transcripts, load_ccds_lengths, NA, SEP
 
 import pandas as pd
 
@@ -261,7 +261,7 @@ class VEPAnnotation:
         ) = load_hugo(str(HUGO_PATH))
 
         self.transcript_map = load_transcript_map(assembly)
-        # self.ccds_length_map = load_ccds_length_map()
+        self.ccds_length_map = load_ccds_length_map()
         self.mane_map = load_mane_map()
 
         self.annotation_map = None
@@ -307,15 +307,18 @@ class VEPAnnotation:
                     transcript_id = transcript.get("Feature", NA)
 
                     # override VEP is canonical and use GENCODE
-                    transcript["is_canonical"] = self.transcript_map.get(
+                    gencode_is_canonical = self.transcript_map.get(
                         transcript_id, {}
                     ).get("is_canonical", 0)
 
-                    transcript["ccds"] = self.transcript_map.get(transcript_id, {}).get(
-                        "ccds", NA
-                    )
-                    transcript["ccds_aa_length"] = self.transcript_map.get(
-                        transcript_id, {}
+                    # now VEP or GENCODE decide if canonical
+                    if gencode_is_canonical:
+                        transcript["is_canonical"] = gencode_is_canonical
+
+                    ccds = self.transcript_map.get(transcript_id, {}).get("ccds", NA)
+                    transcript["ccds"] = ccds
+                    transcript["ccds_aa_length"] = self.ccds_length_map.get(
+                        ccds, {}
                     ).get("aa_length", -1)
 
                     # if transcript["ccds"] != NA:
@@ -678,17 +681,17 @@ def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
     return transcript_map
 
 
-# def load_ccds_length_map() -> dict[str, dict]:
-#     """
-#     Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
-#     """
-#     path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
+def load_ccds_length_map() -> dict[str, dict]:
+    """
+    Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
+    """
+    path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
 
-#     print(f"Loading CCDS length map from {path}...")
+    print(f"Loading CCDS length map from {path}...")
 
-#     ccds_length_map = load_ccds_lengths(str(path))
+    ccds_length_map = load_ccds_lengths(str(path))
 
-#     return ccds_length_map
+    return ccds_length_map
 
 
 def load_mane_map():
