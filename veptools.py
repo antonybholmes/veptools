@@ -404,10 +404,10 @@ class VEPAnnotation:
                         "severity": transcript["severity_rank"],
                         "hgvsp": NA,
                         "hgvsc": NA,
-                        "ccds": transcript.get("ccds", NA),
-                        "ccds_aa_length": transcript.get("ccds_aa_length", NA),
-                        "mane_refseq": transcript.get("mane_refseq", NA),
-                        "mane_status": transcript.get("mane_status", NA),
+                        "ccds": transcript["ccds"],
+                        "ccds_aa_length": blank_val(transcript["ccds_aa_length"]),
+                        "mane_refseq": transcript["mane_refseq"],
+                        "mane_status": transcript["mane_status"],
                     }
 
                     # if transcript_id == "ENST00000332831":
@@ -572,7 +572,7 @@ class VEPAnnotation:
                     exons = SEP.join([str(a["exon"]) for a in annotations])
                     exons_total = SEP.join([str(a["exons"]) for a in annotations])
                     is_canonical = SEP.join(
-                        [str(int(a["is_canonical"])) for a in annotations]
+                        [str(a["is_canonical"]) for a in annotations]
                     )
 
                     biotypes = SEP.join([a["biotype"] for a in annotations])
@@ -591,7 +591,13 @@ class VEPAnnotation:
                     df.at[i, "Secondary_CCDS"] = SEP.join(ccdss)
                     df.at[i, "Secondary_CCDS_AA_Length"] = SEP.join(
                         [
-                            str(self.transcript_map.get(ccds, {}).get("aa_length", -1))
+                            str(
+                                blank_val(
+                                    self.ccds_length_map.get(ccds, {}).get(
+                                        "aa_length", NA
+                                    )
+                                )
+                            )
                             for ccds in ccdss
                         ]
                     )
@@ -639,6 +645,10 @@ def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
         return int(v)
 
     if isinstance(v, int):
+        # treat -1 as missing
+        if v == -1:
+            return NA
+
         return v
 
     v = str(v).strip()
@@ -646,7 +656,7 @@ def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
     if v.isdigit():
         return int(v)
 
-    if v == "":
+    if v == "" or v == "." or v == "-1":
         return NA
 
     return v
