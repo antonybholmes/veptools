@@ -4,7 +4,14 @@ from logging import info
 from pathlib import Path
 from typing import Union
 from urllib.parse import unquote
-from .utils import load_hugo, load_transcripts, load_ccds_lengths, NA, SEP
+from .utils import (
+    load_hugo,
+    get_is_hugo_gene,
+    load_transcripts,
+    load_ccds_lengths,
+    NA,
+    SEP,
+)
 
 import pandas as pd
 
@@ -84,41 +91,21 @@ AA_THREE_TO_ONE_MAP = {
 }
 
 
-def get_is_hugo_gene(
-    gene_id: str,
-    symbol: str,
-    gene_lookup_map: dict[str, str],
-    previous_gene_lookup_map: dict[str, str],
-    alias_gene_lookup_map: dict[str, str],
-) -> bool:
-    gene_id_lower = gene_id.lower()
-    symbol_lower = symbol.lower()
-
-    return (
-        gene_id_lower in gene_lookup_map
-        or gene_id_lower in previous_gene_lookup_map
-        or gene_id_lower in alias_gene_lookup_map
-        or symbol_lower in gene_lookup_map
-        or symbol_lower in previous_gene_lookup_map
-        or symbol_lower in alias_gene_lookup_map
-    )
-
-
-def lookup_gene(
-    id: str,
-    gene_lookup_map: dict[str, str],
-    previous_gene_lookup_map: dict[str, str],
-    alias_gene_lookup_map: dict[str, str],
-) -> str:
-    id_lower = id.lower()
-    if id_lower in gene_lookup_map:
-        return gene_lookup_map[id_lower]
-    elif id_lower in previous_gene_lookup_map:
-        return previous_gene_lookup_map[id_lower]
-    elif id_lower in alias_gene_lookup_map:
-        return alias_gene_lookup_map[id_lower]
-    else:
-        return id
+# def lookup_gene(
+#     id: str,
+#     gene_lookup_map: dict[str, str],
+#     previous_gene_lookup_map: dict[str, str],
+#     alias_gene_lookup_map: dict[str, str],
+# ) -> str:
+#     id_lower = id.lower()
+#     if id_lower in gene_lookup_map:
+#         return gene_lookup_map[id_lower]
+#     elif id_lower in previous_gene_lookup_map:
+#         return previous_gene_lookup_map[id_lower]
+#     elif id_lower in alias_gene_lookup_map:
+#         return alias_gene_lookup_map[id_lower]
+#     else:
+#         return id
 
 
 def extract_csq_header(vcf_file: str) -> tuple[list[str], dict[str, int]]:
@@ -143,13 +130,47 @@ def find_vcf_header_line(vcf_file: str) -> int:
     return -1
 
 
+def format_hgvs(hgvs: str) -> str:
+    # VEP likes to url encode certain characters in the HGVS strings, so we need to decode them
+    hgvs = unquote(hgvs)
+
+    if ":" in hgvs:
+        # remove protein change prefix if present, as we only care about
+        # the actual change for annotation purposes
+        hgvs = hgvs.split(":")[1]
+
+    return hgvs
+
+
+def format_hgvsp(hgvsp: str) -> str:
+    hgvsp = format_hgvs(hgvsp)
+
+    # replace three letter amino acid codes with one letter codes for consistency and easier parsing later
+    hgvsp = hgvsp.lower()
+
+    for three, one in AA_THREE_TO_ONE_MAP.items():
+        hgvsp = hgvsp.replace(three, one)
+
+    return hgvsp
+
+
+def get_highest_severity(consequences: list[str]) -> int:
+    # default non existent low priority consequence to 1000 so that it gets sorted to the end
+    consequence = 1000
+
+    # try to assign the most severe consequence based on the predefined severity ranking,
+    # if no consequences match, will stay at 1000
+    for c in consequences:
+        c = c.strip()
+        if c in CONSEQUENCE_SEVERITY:
+            consequence = min(consequence, CONSEQUENCE_SEVERITY[c])
+
+    return consequence
+
+
 def parse_csq_with_severity(
-    row: pd.Series,
     csq: str,
     header_fields: list[str],
-    gene_lookup_map: dict[str, str],
-    previous_gene_lookup_map: dict[str, str],
-    alias_gene_lookup_map: dict[str, str],
 ) -> list[dict]:
     """
     Parse a VEP CSQ field and return canonical transcripts sorted by
@@ -179,31 +200,38 @@ def parse_csq_with_severity(
         canonical_flag = fields[field_index.get("CANONICAL", -1)]
 
         is_canonical = canonical_flag == "YES"
-        is_protein_coding = "protein_coding" in fields[field_index.get("BIOTYPE", -1)]
-        has_protein_change = fields[field_index.get("HGVSp", -1)] != ""
+
+        biotype = fields[field_index.get("BIOTYPE", -1)]
+        is_protein_coding = "protein_coding" in biotype
+        hgvsp = fields[field_index.get("HGVSp", -1)]
+        hgvsc = fields[field_index.get("HGVSc", -1)]
+
+        hgvsc = format_hgvs(hgvsc)
+        hgvsp = format_hgvsp(hgvsp)
+
+        has_protein_change = hgvsp.startswith("p.")  # hgvsp != ""
+        is_nonsense = has_protein_change and ("Ter" in hgvsp or "*" in hgvsp)
 
         consequences = fields[field_index.get("Consequence", 1)].split("&")
 
-        consequence = 100  # default low priority
-        for c in consequences:
-            c = c.strip()
-            if c in CONSEQUENCE_SEVERITY:
-                consequence = min(consequence, CONSEQUENCE_SEVERITY[c])
+        severity = get_highest_severity(consequences)
 
         transcript_info = {name: fields[i] for i, name in enumerate(header_fields)}
-        is_hugo_gene = get_is_hugo_gene(
-            transcript_info["Gene"],
-            transcript_info["SYMBOL"],
-            gene_lookup_map,
-            previous_gene_lookup_map,
-            alias_gene_lookup_map,
-        )
 
-        transcript_info["is_canonical"] = blank_val(is_canonical)
-        transcript_info["is_hugo_gene"] = blank_val(is_hugo_gene)
-        transcript_info["is_protein_coding"] = blank_val(is_protein_coding)
-        transcript_info["has_protein_change"] = blank_val(has_protein_change)
-        transcript_info["severity_rank"] = consequence
+        # if hgvsp != "":
+        #    print(hgvsp)
+
+        transcript_info["biotype"] = biotype
+        transcript_info["hgvsc"] = hgvsc
+        transcript_info["hgvsp"] = hgvsp
+        transcript_info["is_canonical"] = is_canonical
+        transcript_info["is_protein_coding"] = is_protein_coding
+        transcript_info["has_protein_change"] = has_protein_change
+        transcript_info["is_nonsense"] = is_nonsense
+        transcript_info["severity_rank"] = severity
+
+        transcript_info["gene_id"] = transcript_info.get("Gene", NA)
+        transcript_info["gene_symbol"] = transcript_info.get("SYMBOL", NA)
 
         results.append(transcript_info)
 
@@ -251,15 +279,13 @@ class VEPAnnotation:
         assembly: str = "hg19",
     ):
         self.vcf_file = vcf_file
+        self.assembly = assembly
 
         self.header_line = find_vcf_header_line(vcf_file)
         self.csq_fields, self.csq_field_map = extract_csq_header(vcf_file)
-        (
-            self.gene_lookup_map,
-            self.previous_gene_lookup_map,
-            self.alias_gene_lookup_map,
-        ) = load_hugo(str(HUGO_PATH))
+        self.hugo_info = load_hugo(str(HUGO_PATH))
 
+        # self.transcript_v19_map = load_v19_transcript_map()
         self.transcript_map = load_transcript_map(assembly)
         self.ccds_length_map = load_ccds_length_map()
         self.mane_map = load_mane_map()
@@ -294,17 +320,26 @@ class VEPAnnotation:
                     continue
 
                 transcripts = parse_csq_with_severity(
-                    row,
                     csq,
                     self.csq_fields,
-                    self.gene_lookup_map,
-                    self.previous_gene_lookup_map,
-                    self.alias_gene_lookup_map,
                 )
 
                 # add extra annotation for sorting
                 for transcript in transcripts:
                     transcript_id = transcript.get("Feature", NA)
+
+                    # add hugo gene symbol and is_hugo_gene flag for sorting
+                    hugo_info = get_is_hugo_gene(
+                        transcript["gene_id"],
+                        transcript["gene_symbol"],
+                        self.hugo_info,
+                    )
+
+                    # symbol will be either the original symbol or the hugo symbol if found,
+                    # but we keep the original symbol in the gene_symbol field for reference
+                    transcript["gene_symbol"] = hugo_info["symbol"]
+                    transcript["hgnc_id"] = hugo_info["hgnc_id"]
+                    transcript["is_hugo_gene"] = hugo_info["is_hugo_gene"]
 
                     gencode_info = self.transcript_map.get(transcript_id, {})
 
@@ -312,18 +347,27 @@ class VEPAnnotation:
 
                     gencode_is_canonical = gencode_info.get("is_canonical", 0)
 
-                    # now VEP or GENCODE decide if canonical
+                    # use VEP or GENCODE decide if canonical
                     if gencode_is_canonical:
                         transcript["is_canonical"] = 1
 
                     ccds = gencode_info.get("ccds", NA)
+
+                    # if self.assembly == "hg19":
+                    #     v19_info = self.transcript_v19_map.get(transcript_id, {})
+                    #     if ccds == NA:
+                    #         ccds = v19_info.get("ccds", ccds)
+
                     transcript["ccds"] = ccds
+
+                    ccds_info = self.ccds_length_map.get(ccds, {})
+
+                    # ccds must always be numeric for sorting
+                    ccds_aa_length = ccds_info.get("aa_length", -1)
 
                     # we don't use na here as we need to sort by this so
                     # cannot intermix strings and ints
-                    transcript["ccds_aa_length"] = self.ccds_length_map.get(
-                        ccds, {}
-                    ).get("aa_length", -1)
+                    transcript["ccds_aa_length"] = ccds_aa_length
 
                     # if transcript["ccds"] != NA:
                     #     print(
@@ -341,13 +385,13 @@ class VEPAnnotation:
                         transcript["mane_refseq"] = mane_info["refseq"]
                         transcript["mane_status"] = mane_info["status"]
 
-                # sort by which we think might be priority
+                # sort by which we think might be priority, we want
+                # mutations in a ccds to be more likely to be considered primary,
+                # and if multiple ccds, then the longest one, as a proxy for most complete annotation.
+                # Also want to prioritize transcripts with protein changes and with hugo symbols,
+                # as these are more likely to be relevant for our analysis
                 transcripts.sort(
                     key=lambda t: (
-                        # protein changes should come first
-                        not t["has_protein_change"],
-                        # pick the one with most severe consequence
-                        t["severity_rank"],
                         # if has hugo symbol, more likely to be primary
                         not t["is_hugo_gene"],
                         # if protein coding, more likely to be primary
@@ -360,29 +404,23 @@ class VEPAnnotation:
                         not t["is_canonical"],
                         # if nothing else try longest CCDS length, as a proxy for most complete transcript
                         -t["ccds_aa_length"],
+                        # protein changes should come first
+                        not t["has_protein_change"],
+                        # nonsense mutations should come first
+                        not t["is_nonsense"],
+                        # pick the one with most severe consequence
+                        t["severity_rank"],
                     )
                 )
 
                 for ti, transcript in enumerate(transcripts):
                     transcript_id = transcript.get("Feature", NA)
-                    biotype = transcript.get("BIOTYPE", NA)
-                    is_protein_coding = 1 if "protein_coding" in biotype else 0
+
                     vep_exon_info = transcript.get("EXON", NA)
                     exon_num = NA
-                    exon_total = transcript.get("exons", NA)
+                    exon_total = transcript["exons"]
                     consequences = SEP.join(
                         transcript.get("Consequence", NA).split("&")
-                    )
-                    is_canonical = transcript.get("is_canonical", NA)
-                    is_hugo_gene = transcript.get("is_hugo_gene", NA)
-                    symbol = transcript.get("SYMBOL", NA)
-                    gene_id = transcript.get("Gene", NA)
-
-                    symbol = lookup_gene(
-                        symbol,
-                        self.gene_lookup_map,
-                        self.previous_gene_lookup_map,
-                        self.alias_gene_lookup_map,
                     )
 
                     if vep_exon_info != NA and "/" in vep_exon_info:
@@ -391,23 +429,29 @@ class VEPAnnotation:
                         exon_num, exon_total = vep_exon_info.split("/")
 
                     annotation = {
-                        "gene_id": blank_val(gene_id),
-                        "symbol": blank_val(symbol),
-                        "is_canonical": blank_val(is_canonical),
-                        "is_hugo_gene": blank_val(is_hugo_gene),
-                        "is_protein_coding": blank_val(is_protein_coding),
+                        "gene_id": blank_val(transcript["gene_id"]),
+                        "gene_symbol": blank_val(transcript["gene_symbol"]),
+                        "hgnc_id": blank_val(transcript["hgnc_id"]),
+                        "is_hugo_gene": blank_val(transcript["is_hugo_gene"]),
+                        # "hugo_gene_symbol": blank_val(hugo_gene_symbol),
+                        "is_canonical": blank_val(transcript["is_canonical"]),
+                        "is_protein_coding": blank_val(transcript["is_protein_coding"]),
+                        "has_protein_change": blank_val(
+                            transcript["has_protein_change"]
+                        ),
+                        "is_nonsense": blank_val(transcript["is_nonsense"]),
                         "transcript_id": blank_val(transcript_id),
                         "exon": blank_val(exon_num),
                         "exons": blank_val(exon_total),
-                        "biotype": blank_val(biotype),
+                        "biotype": blank_val(transcript["biotype"]),
                         "consequence": blank_val(consequences),
-                        "severity": transcript["severity_rank"],
-                        "hgvsp": NA,
-                        "hgvsc": NA,
-                        "ccds": transcript["ccds"],
+                        "severity": blank_val(transcript["severity_rank"]),
+                        "hgvsp": blank_val(transcript["hgvsp"]),
+                        "hgvsc": blank_val(transcript["hgvsc"]),
+                        "ccds": blank_val(transcript["ccds"]),
                         "ccds_aa_length": blank_val(transcript["ccds_aa_length"]),
-                        "mane_refseq": transcript["mane_refseq"],
-                        "mane_status": transcript["mane_status"],
+                        "mane_refseq": blank_val(transcript["mane_refseq"]),
+                        "mane_status": blank_val(transcript["mane_status"]),
                     }
 
                     # if transcript_id == "ENST00000332831":
@@ -415,37 +459,37 @@ class VEPAnnotation:
                     #         f"Found transcript ENST00000332831 with annotation: {annotation}"
                     #     )
 
-                    if is_protein_coding:
-                        # matcher = re.search(r":(c\..+)", info[10])
-                        hgvscs = transcript.get("HGVSc", NA)
-                        hgvsps = transcript.get("HGVSp", NA)
+                    # if is_protein_coding:
+                    #     # matcher = re.search(r":(c\..+)", info[10])
+                    #     hgvscs = transcript.get("HGVSc", NA)
+                    #     hgvsps = transcript.get("HGVSp", NA)
 
-                        hgvscs = decode_hgvs(hgvscs)
-                        hgvsps = decode_hgvs(hgvsps)
+                    #     hgvscs = decode_hgvs(hgvscs)
+                    #     hgvsps = decode_hgvs(hgvsps)
 
-                        if ":" in hgvscs:
-                            hgvscs = hgvscs.split(":")[1]
+                    #     if ":" in hgvscs:
+                    #         hgvscs = hgvscs.split(":")[1]
 
-                        # matcher = re.search(r":(p\..+)", info[11])
+                    #     # matcher = re.search(r":(p\..+)", info[11])
 
-                        # print(f"Raw HGVSp: {hgvsp}")
+                    #     # print(f"Raw HGVSp: {hgvsp}")
 
-                        if ":" in hgvsps:
-                            hgvsps = hgvsps.split(":")[1]
+                    #     if ":" in hgvsps:
+                    #         hgvsps = hgvsps.split(":")[1]
 
-                        protein_lc = hgvsps.lower()
+                    #     protein_lc = hgvsps.lower()
 
-                        for three, one in AA_THREE_TO_ONE_MAP.items():
-                            protein_lc = protein_lc.replace(three, one)
+                    #     for three, one in AA_THREE_TO_ONE_MAP.items():
+                    #         protein_lc = protein_lc.replace(three, one)
 
-                        annotation["hgvsp"] = blank_val(protein_lc)
-                        annotation["hgvsc"] = blank_val(hgvscs)
+                    #     annotation["hgvsp"] = blank_val(protein_lc)
+                    #     annotation["hgvsc"] = blank_val(hgvscs)
 
                     # mode = 0 if ti == 0 and is_hugo_gene and is_protein_coding else 1
                     # first item wins primary annotation
-                    mode = 0 if ti == 0 else 1
+                    primary_mode = 0 if ti == 0 else 1
 
-                    self.annotation_map[vep_id][mode].append(annotation)
+                    self.annotation_map[vep_id][primary_mode].append(annotation)
             # break
 
         print("Finished parsing VCF and building annotation map.")
@@ -480,6 +524,7 @@ class VEPAnnotation:
                 )
 
             df["VEP_Gene_ID"] = NA
+            # df["VEP_Hugo_Gene_Symbol"] = NA
             df["VEP_Gene_Symbol"] = NA
             df["VEP_Is_Hugo_Gene"] = NA
             df["VEP_Biotype"] = NA
@@ -498,6 +543,7 @@ class VEPAnnotation:
 
             df["VEP_Secondary_Gene_ID"] = NA
             df["VEP_Secondary_Gene_Symbol"] = NA
+            # df["VEP_Secondary_Hugo_Gene_Symbol"] = NA
             df["VEP_Secondary_Biotype"] = NA
             df["VEP_Secondary_HGVSp"] = NA
             df["VEP_Secondary_HGVSc"] = NA
@@ -527,7 +573,8 @@ class VEPAnnotation:
                     transcript_id = annotation["transcript_id"]
 
                     df.at[i, "VEP_Gene_ID"] = annotation["gene_id"]
-                    df.at[i, "VEP_Gene_Symbol"] = annotation["symbol"]
+                    df.at[i, "VEP_Gene_Symbol"] = annotation["gene_symbol"]
+                    # df.at[i, "VEP_Hugo_Gene_Symbol"] = annotation["hugo_gene_symbol"]
 
                     df.at[i, "VEP_Is_Hugo_Gene"] = annotation["is_hugo_gene"]
 
@@ -562,7 +609,10 @@ class VEPAnnotation:
                     severities = SEP.join([str(a["severity"]) for a in annotations])
 
                     gene_ids = SEP.join([a["gene_id"] for a in annotations])
-                    gene_symbols = SEP.join([a["symbol"] for a in annotations])
+                    gene_symbols = SEP.join([a["gene_symbol"] for a in annotations])
+                    # hugo_gene_symbols = SEP.join(
+                    #    [a["hugo_gene_symbol"] for a in annotations]
+                    # )
                     transcript_ids = SEP.join([a["transcript_id"] for a in annotations])
                     ccdss = [
                         self.transcript_map.get(a["transcript_id"], {}).get("ccds", NA)
@@ -579,6 +629,7 @@ class VEPAnnotation:
 
                     df.at[i, "VEP_Secondary_Gene_ID"] = gene_ids
                     df.at[i, "VEP_Secondary_Gene_Symbol"] = gene_symbols
+                    # df.at[i, "VEP_Secondary_Hugo_Gene_Symbol"] = hugo_gene_symbols
                     df.at[i, "VEP_Secondary_Biotype"] = biotypes
                     df.at[i, "VEP_Secondary_HGVSp"] = hgvsps
                     df.at[i, "VEP_Secondary_HGVSc"] = hgvscs
@@ -634,8 +685,8 @@ class VEPAnnotation:
 
 
 # VEP likes to url encode certain characters in the HGVS strings
-def decode_hgvs(encoded_str: str) -> str:
-    return unquote(encoded_str)
+# def decode_hgvs(encoded_str: str) -> str:
+#    return unquote(encoded_str)
 
 
 def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
@@ -656,7 +707,7 @@ def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
     if v.isdigit():
         return int(v)
 
-    if v == "" or v == "." or v == "-1":
+    if v == "" or v == NA or v == "-1":
         return NA
 
     return v
@@ -691,12 +742,61 @@ def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
 
     print(f"Loading CCDS map from {path}...")
 
-    transcript_map = load_transcripts(str(path))
+    transcript_map = {}
+
+    load_transcripts(str(path), transcript_map)
+
+    print("x", transcript_map.get("ENST00000445750"))
+
+    # augment with v19 transcripts for hg19, which have some ccds annotations missing from v48lift37
+    if assembly == "hg19":
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_transcripts_v19_grch37.tsv"
+        )
+
+        print(f"Loading v19 CCDS map from {path}...")
+
+        load_transcripts(str(path), transcript_map)
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_transcripts_v10_grch37.tsv"
+        )
+
+        print(f"Loading v10 CCDS map from {path}...")
+
+        # v10_transcript_map = {}
+        load_transcripts(str(path), transcript_map)
+
+        # transcript_map = transcript_map | v19_transcript_map | v10_transcript_map
+
+    print(transcript_map.get("ENST00000445750"))
 
     return transcript_map
 
 
-def load_ccds_length_map() -> dict[str, dict]:
+# def load_v19_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
+#     """
+#     Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
+#     """
+
+#     path = (
+#         Path(__file__).parent / "res" / assembly / "gencode_transcripts_v19_grch37.tsv"
+#     )
+
+#     print(f"Loading CCDS map from {path}...")
+
+#     transcript_map = load_transcripts(str(path))
+
+#     return transcript_map
+
+
+def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
     """
     Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
     """
@@ -705,6 +805,48 @@ def load_ccds_length_map() -> dict[str, dict]:
     print(f"Loading CCDS length map from {path}...")
 
     ccds_length_map = load_ccds_lengths(str(path))
+
+    if assembly == "hg19":
+        # add multiple versions ccds lengths as well, which are missing some ccds that are in v48lift37
+        # in the hope we can match old and withdrawn ccds ids that are missing from the main map.
+
+        path = (
+            Path(__file__).parent / "res" / assembly / "CCDS_aa_lengths.v15.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        v19_ccds_length_map = load_ccds_lengths(str(path))
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "CCDS_aa_lengths.vhs37-1.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        vhs371_ccds_length_map = load_ccds_lengths(str(path))
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "CCDS_aa_lengths.vhs37-3.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        vhs373_ccds_length_map = load_ccds_lengths(str(path))
+
+        # add this info to the main ccds length map
+        ccds_length_map = (
+            ccds_length_map
+            | v19_ccds_length_map
+            | vhs373_ccds_length_map
+            | vhs371_ccds_length_map
+        )
 
     return ccds_length_map
 

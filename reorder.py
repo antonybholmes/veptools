@@ -13,6 +13,7 @@ NA = "."
 
 COLUMNS = [
     "VEP_Gene_Symbol",
+    "VEP_Is_Hugo_Gene",
     "VEP_Biotype",
     "Chromosome",
     "Start_Position",
@@ -34,7 +35,6 @@ COLUMNS = [
     "db",
     "Notes",
     "VEP_Gene_ID",
-    "VEP_Is_Hugo_Gene",
     "VEP_Transcript",
     "VEP_Canonical",
     "VEP_Is_Canonical",
