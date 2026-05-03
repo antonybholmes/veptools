@@ -18,52 +18,78 @@ import pandas as pd
 VEP_VERSION = "Ensembl_VEP_115"
 HUGO_PATH = Path(__file__).parent / "res" / "hugo_approved_20260409.tsv"
 MANE_PATH = Path(__file__).parent / "res" / "grch38" / "MANE.GRCh38.v1.5.summary.txt"
+SEVERITY_PATH = Path(__file__).parent / "res" / "severity.tsv"
 
+
+def load_severity() -> dict[str, dict]:
+    """
+    Load severity map for given assembly which is just a map of severity ids to their descriptions.
+    https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html?redirect=no
+    """
+
+    df = pd.read_csv(str(SEVERITY_PATH), sep="\t", header=0, keep_default_na=False)
+
+    severity_map = {}
+
+    for _, row in df.iterrows():
+        term = row["term"]
+        severity = row["severity"]
+        impact = row["impact"]
+
+        severity_map[term] = {
+            "severity": severity,
+            "impact": impact,
+        }
+
+    return severity_map
+
+
+CONSEQUENCE_SEVERITY_MAP = load_severity()
 
 # https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html?redirect=no
-CONSEQUENCE_SEVERITY = {
-    "transcript_ablation": 1,
-    "splice_acceptor_variant": 2,
-    "splice_donor_variant": 3,
-    "stop_gained": 4,
-    "frameshift_variant": 5,
-    "stop_lost": 6,
-    "start_lost": 7,
-    "transcript_amplification": 8,
-    "feature_elongation": 9,
-    "feature_truncation": 10,
-    "inframe_insertion": 11,
-    "inframe_deletion": 11,
-    "missense_variant": 12,
-    "protein_altering_variant": 13,
-    "splice_donor_5th_base_variant": 14,
-    "splice_region_variant": 15,
-    "splice_donor_region_variant": 16,
-    "splice_polypyrimidine_tract_variant": 17,
-    "incomplete_termiNAl_codon_variant": 18,
-    "start_retained_variant": 19,
-    "stop_retained_variant": 20,
-    "synonymous_variant": 21,
-    "coding_sequence_variant": 22,
-    "mature_miRNA_variant": 23,
-    "5_prime_UTR_variant": 24,
-    "3_prime_UTR_variant": 25,
-    "non_coding_transcript_exon_variant": 26,
-    "intron_variant": 27,
-    "NMD_transcript_variant": 28,
-    "non_coding_transcript_variant": 29,
-    "coding_transcript_variant": 30,
-    "upstream_gene_variant": 31,
-    "downstream_gene_variant": 32,
-    "TFBS_ablation": 33,
-    "TFBS_amplification": 34,
-    "TF_binding_site_variant": 35,
-    "regulatory_region_ablation": 36,
-    "regulatory_region_amplification": 37,
-    "regulatory_region_variant": 38,
-    "intergenic_variant": 39,
-    "sequence_variant": 40,
-}
+# CONSEQUENCE_SEVERITY = {
+#     "transcript_ablation": 1,
+#     "splice_acceptor_variant": 2,
+#     "splice_donor_variant": 3,
+#     "stop_gained": 4,
+#     "frameshift_variant": 5,
+#     "stop_lost": 6,
+#     "start_lost": 7,
+#     "transcript_amplification": 8,
+#     "feature_elongation": 9,
+#     "feature_truncation": 10,
+#     "inframe_insertion": 11,
+#     "inframe_deletion": 11,
+#     "missense_variant": 12,
+#     "protein_altering_variant": 13,
+#     "splice_donor_5th_base_variant": 14,
+#     "splice_region_variant": 15,
+#     "splice_donor_region_variant": 16,
+#     "splice_polypyrimidine_tract_variant": 17,
+#     "incomplete_termiNAl_codon_variant": 18,
+#     "start_retained_variant": 19,
+#     "stop_retained_variant": 20,
+#     "synonymous_variant": 21,
+#     "coding_sequence_variant": 22,
+#     "mature_miRNA_variant": 23,
+#     "5_prime_UTR_variant": 24,
+#     "3_prime_UTR_variant": 25,
+#     "non_coding_transcript_exon_variant": 26,
+#     "intron_variant": 27,
+#     "NMD_transcript_variant": 28,
+#     "non_coding_transcript_variant": 29,
+#     "coding_transcript_variant": 30,
+#     "upstream_gene_variant": 31,
+#     "downstream_gene_variant": 32,
+#     "TFBS_ablation": 33,
+#     "TFBS_amplification": 34,
+#     "TF_binding_site_variant": 35,
+#     "regulatory_region_ablation": 36,
+#     "regulatory_region_amplification": 37,
+#     "regulatory_region_variant": 38,
+#     "intergenic_variant": 39,
+#     "sequence_variant": 40,
+# }
 
 # change 3 letter amino acid NAmes to 1 letter
 AA_THREE_TO_ONE_MAP = {
@@ -156,14 +182,16 @@ def format_hgvsp(hgvsp: str) -> str:
 
 def get_highest_severity(consequences: list[str]) -> int:
     # default non existent low priority consequence to 1000 so that it gets sorted to the end
-    consequence = 1000
+    consequence = {"severity": 1000, "impact": NA}
 
     # try to assign the most severe consequence based on the predefined severity ranking,
     # if no consequences match, will stay at 1000
     for c in consequences:
         c = c.strip()
-        if c in CONSEQUENCE_SEVERITY:
-            consequence = min(consequence, CONSEQUENCE_SEVERITY[c])
+        if c in CONSEQUENCE_SEVERITY_MAP:
+            s = CONSEQUENCE_SEVERITY_MAP[c]["severity"]
+            if s < consequence["severity"]:
+                consequence = CONSEQUENCE_SEVERITY_MAP[c]
 
     return consequence
 
@@ -228,7 +256,8 @@ def parse_csq_with_severity(
         transcript_info["is_protein_coding"] = is_protein_coding
         transcript_info["has_protein_change"] = has_protein_change
         transcript_info["is_nonsense"] = is_nonsense
-        transcript_info["severity_rank"] = severity
+        transcript_info["severity_rank"] = severity["severity"]
+        transcript_info["severity_impact"] = severity["impact"]
 
         transcript_info["gene_id"] = transcript_info.get("Gene", NA)
         transcript_info["gene_symbol"] = transcript_info.get("SYMBOL", NA)
@@ -270,6 +299,194 @@ def extract_csq(info_field: str) -> str:
 def make_vep_id(chrom: str, start: int, ref: str, alt: str) -> str:
     vep_id = f"{chrom}_{start + 1 if ref == '-' else start}_{ref}/{alt}"
     return vep_id
+
+
+def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
+    # check if str is int, if so return int, otherwise return NA if blank, otherwise return original string
+
+    if isinstance(v, bool):
+        return int(v)
+
+    if isinstance(v, int):
+        # treat -1 as missing
+        if v == -1:
+            return NA
+
+        return v
+
+    v = str(v).strip()
+
+    if v.isdigit():
+        return int(v)
+
+    if v == "" or v == NA or v == "-1":
+        return NA
+
+    return v
+
+
+def load_gene_lookup_maps() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map = load_hugo(
+        str(HUGO_PATH)
+    )
+
+    return gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map
+
+
+def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
+    """
+    Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
+    """
+    if assembly == "hg38":
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_v48_basic_transcripts.tsv"
+        )
+    else:
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_v48lift37_basic_transcripts.tsv"
+        )
+
+    print(f"Loading CCDS map from {path}...")
+
+    transcript_map = {}
+
+    load_transcripts(str(path), transcript_map)
+
+    print("x", transcript_map.get("ENST00000445750"))
+
+    # augment with v19 transcripts for hg19, which have some ccds annotations missing from v48lift37
+    if assembly == "hg19":
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_transcripts_v19_grch37.tsv"
+        )
+
+        print(f"Loading v19 CCDS map from {path}...")
+
+        load_transcripts(str(path), transcript_map)
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "gencode_transcripts_v10_grch37.tsv"
+        )
+
+        print(f"Loading v10 CCDS map from {path}...")
+
+        # v10_transcript_map = {}
+        load_transcripts(str(path), transcript_map)
+
+        # transcript_map = transcript_map | v19_transcript_map | v10_transcript_map
+
+    return transcript_map
+
+
+# def load_v19_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
+#     """
+#     Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
+#     """
+
+#     path = (
+#         Path(__file__).parent / "res" / assembly / "gencode_transcripts_v19_grch37.tsv"
+#     )
+
+#     print(f"Loading CCDS map from {path}...")
+
+#     transcript_map = load_transcripts(str(path))
+
+#     return transcript_map
+
+
+def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
+    """
+    Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
+    """
+    path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
+
+    print(f"Loading CCDS length map from {path}...")
+
+    ccds_length_map = load_ccds_lengths(str(path))
+
+    if assembly == "hg19":
+        # add multiple versions ccds lengths as well, which are missing some ccds that are in v48lift37
+        # in the hope we can match old and withdrawn ccds ids that are missing from the main map.
+
+        path = (
+            Path(__file__).parent / "res" / assembly / "CCDS_aa_lengths.v15.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        v19_ccds_length_map = load_ccds_lengths(str(path))
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "CCDS_aa_lengths.vhs37-1.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        vhs371_ccds_length_map = load_ccds_lengths(str(path))
+
+        path = (
+            Path(__file__).parent
+            / "res"
+            / assembly
+            / "CCDS_aa_lengths.vhs37-3.grch37.tsv"
+        )
+
+        print(f"Loading hg19 CCDS length map from {path}...")
+
+        vhs373_ccds_length_map = load_ccds_lengths(str(path))
+
+        # add this info to the main ccds length map
+        ccds_length_map = (
+            ccds_length_map
+            | v19_ccds_length_map
+            | vhs373_ccds_length_map
+            | vhs371_ccds_length_map
+        )
+
+    return ccds_length_map
+
+
+def load_mane_map():
+    df = pd.read_csv(MANE_PATH, sep="\t", header=0, keep_default_na=False)
+
+    mane_map = {}
+
+    for _, row in df.iterrows():
+        ensembl_id = row["Ensembl_Gene"].split(".")[0]
+        symbol = row["symbol"]
+        refseq = row["RefSeq_nuc"].split(".")[0]
+        transcript = row["Ensembl_nuc"].split(".")[0]
+        status = row["MANE_status"]
+
+        data = {
+            "ensembl": ensembl_id,
+            "gene_symbol": symbol,
+            "refseq": refseq,
+            "transcript": transcript,
+            "status": status,
+        }
+
+        mane_map[ensembl_id] = data
+        mane_map[refseq] = data
+        mane_map[transcript] = data
+        mane_map[symbol] = data
+
+    return mane_map
 
 
 class VEPAnnotation:
@@ -687,194 +904,3 @@ class VEPAnnotation:
 # VEP likes to url encode certain characters in the HGVS strings
 # def decode_hgvs(encoded_str: str) -> str:
 #    return unquote(encoded_str)
-
-
-def blank_val(v: Union[str, bool, int]) -> Union[str, int]:
-    # check if str is int, if so return int, otherwise return NA if blank, otherwise return original string
-
-    if isinstance(v, bool):
-        return int(v)
-
-    if isinstance(v, int):
-        # treat -1 as missing
-        if v == -1:
-            return NA
-
-        return v
-
-    v = str(v).strip()
-
-    if v.isdigit():
-        return int(v)
-
-    if v == "" or v == NA or v == "-1":
-        return NA
-
-    return v
-
-
-def load_gene_lookup_maps() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map = load_hugo(
-        str(HUGO_PATH)
-    )
-
-    return gene_lookup_map, previous_gene_lookup_map, alias_gene_lookup_map
-
-
-def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
-    """
-    Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
-    """
-    if assembly == "hg38":
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "gencode_v48_basic_transcripts.tsv"
-        )
-    else:
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "gencode_v48lift37_basic_transcripts.tsv"
-        )
-
-    print(f"Loading CCDS map from {path}...")
-
-    transcript_map = {}
-
-    load_transcripts(str(path), transcript_map)
-
-    print("x", transcript_map.get("ENST00000445750"))
-
-    # augment with v19 transcripts for hg19, which have some ccds annotations missing from v48lift37
-    if assembly == "hg19":
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "gencode_transcripts_v19_grch37.tsv"
-        )
-
-        print(f"Loading v19 CCDS map from {path}...")
-
-        load_transcripts(str(path), transcript_map)
-
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "gencode_transcripts_v10_grch37.tsv"
-        )
-
-        print(f"Loading v10 CCDS map from {path}...")
-
-        # v10_transcript_map = {}
-        load_transcripts(str(path), transcript_map)
-
-        # transcript_map = transcript_map | v19_transcript_map | v10_transcript_map
-
-    print(transcript_map.get("ENST00000445750"))
-
-    return transcript_map
-
-
-# def load_v19_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
-#     """
-#     Load CCDS map for given assembly which is just a map of symbols to CCDS ids.
-#     """
-
-#     path = (
-#         Path(__file__).parent / "res" / assembly / "gencode_transcripts_v19_grch37.tsv"
-#     )
-
-#     print(f"Loading CCDS map from {path}...")
-
-#     transcript_map = load_transcripts(str(path))
-
-#     return transcript_map
-
-
-def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
-    """
-    Load CCDS length map for given assembly which is just a map of CCDS ids to their amino acid lengths.
-    """
-    path = Path(__file__).parent / "res" / "CCDS_aa_lengths.tsv"
-
-    print(f"Loading CCDS length map from {path}...")
-
-    ccds_length_map = load_ccds_lengths(str(path))
-
-    if assembly == "hg19":
-        # add multiple versions ccds lengths as well, which are missing some ccds that are in v48lift37
-        # in the hope we can match old and withdrawn ccds ids that are missing from the main map.
-
-        path = (
-            Path(__file__).parent / "res" / assembly / "CCDS_aa_lengths.v15.grch37.tsv"
-        )
-
-        print(f"Loading hg19 CCDS length map from {path}...")
-
-        v19_ccds_length_map = load_ccds_lengths(str(path))
-
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "CCDS_aa_lengths.vhs37-1.grch37.tsv"
-        )
-
-        print(f"Loading hg19 CCDS length map from {path}...")
-
-        vhs371_ccds_length_map = load_ccds_lengths(str(path))
-
-        path = (
-            Path(__file__).parent
-            / "res"
-            / assembly
-            / "CCDS_aa_lengths.vhs37-3.grch37.tsv"
-        )
-
-        print(f"Loading hg19 CCDS length map from {path}...")
-
-        vhs373_ccds_length_map = load_ccds_lengths(str(path))
-
-        # add this info to the main ccds length map
-        ccds_length_map = (
-            ccds_length_map
-            | v19_ccds_length_map
-            | vhs373_ccds_length_map
-            | vhs371_ccds_length_map
-        )
-
-    return ccds_length_map
-
-
-def load_mane_map():
-    df = pd.read_csv(MANE_PATH, sep="\t", header=0, keep_default_na=False)
-
-    mane_map = {}
-
-    for i, row in df.iterrows():
-
-        ensembl_id = row["Ensembl_Gene"].split(".")[0]
-        symbol = row["symbol"]
-        refseq = row["RefSeq_nuc"].split(".")[0]
-        transcript = row["Ensembl_nuc"].split(".")[0]
-        status = row["MANE_status"]
-
-        data = {
-            "ensembl": ensembl_id,
-            "gene_symbol": symbol,
-            "refseq": refseq,
-            "transcript": transcript,
-            "status": status,
-        }
-
-        mane_map[ensembl_id] = data
-        mane_map[refseq] = data
-        mane_map[transcript] = data
-        mane_map[symbol] = data
-
-    return mane_map
