@@ -27,6 +27,7 @@ def load_severity() -> dict[str, dict]:
     https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html?redirect=no
     """
 
+    print(f"Loading severity map from {SEVERITY_PATH}...")
     df = pd.read_csv(str(SEVERITY_PATH), sep="\t", header=0, keep_default_na=False)
 
     severity_map = {}
@@ -35,6 +36,15 @@ def load_severity() -> dict[str, dict]:
         term = row["term"]
         severity = row["severity"]
         impact = row["impact"]
+
+        # print(
+        #     "Loaded severity term: ",
+        #     term,
+        #     severity,
+        #     impact,
+        #     type(severity),
+        #     type(impact),
+        # )
 
         severity_map[term] = {
             "severity": severity,
@@ -190,6 +200,10 @@ def get_highest_severity(consequences: list[str]) -> int:
         c = c.strip()
         if c in CONSEQUENCE_SEVERITY_MAP:
             s = CONSEQUENCE_SEVERITY_MAP[c]["severity"]
+            # print(
+            #     f"Consequence {c} has severity {s}  {consequence['severity']} {type(s)} {type(consequence['severity'])}"
+            # )
+
             if s < consequence["severity"]:
                 consequence = CONSEQUENCE_SEVERITY_MAP[c]
 
@@ -238,7 +252,9 @@ def parse_csq_with_severity(
         hgvsp = format_hgvsp(hgvsp)
 
         has_protein_change = hgvsp.startswith("p.")  # hgvsp != ""
-        is_nonsense = has_protein_change and ("Ter" in hgvsp or "*" in hgvsp)
+        is_nonsense = has_protein_change and (
+            "Ter" in hgvsp or "ter" in hgvsp or "*" in hgvsp
+        )
 
         consequences = fields[field_index.get("Consequence", 1)].split("&")
 
@@ -249,6 +265,7 @@ def parse_csq_with_severity(
         # if hgvsp != "":
         #    print(hgvsp)
 
+        # add some extra fields for sorting and annotation purposes
         transcript_info["biotype"] = biotype
         transcript_info["hgvsc"] = hgvsc
         transcript_info["hgvsp"] = hgvsp
@@ -358,8 +375,6 @@ def load_transcript_map(assembly: str = "hg19") -> dict[str, dict]:
 
     load_transcripts(str(path), transcript_map)
 
-    print("x", transcript_map.get("ENST00000445750"))
-
     # augment with v19 transcripts for hg19, which have some ccds annotations missing from v48lift37
     if assembly == "hg19":
         path = (
@@ -414,7 +429,9 @@ def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
 
     print(f"Loading CCDS length map from {path}...")
 
-    ccds_length_map = load_ccds_lengths(str(path))
+    ccds_length_map = {}
+
+    load_ccds_lengths(str(path), ccds_length_map)
 
     if assembly == "hg19":
         # add multiple versions ccds lengths as well, which are missing some ccds that are in v48lift37
@@ -426,7 +443,7 @@ def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
 
         print(f"Loading hg19 CCDS length map from {path}...")
 
-        v19_ccds_length_map = load_ccds_lengths(str(path))
+        load_ccds_lengths(str(path), ccds_length_map)
 
         path = (
             Path(__file__).parent
@@ -437,7 +454,7 @@ def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
 
         print(f"Loading hg19 CCDS length map from {path}...")
 
-        vhs371_ccds_length_map = load_ccds_lengths(str(path))
+        load_ccds_lengths(str(path), ccds_length_map)
 
         path = (
             Path(__file__).parent
@@ -448,15 +465,7 @@ def load_ccds_length_map(assembly: str = "hg19") -> dict[str, dict]:
 
         print(f"Loading hg19 CCDS length map from {path}...")
 
-        vhs373_ccds_length_map = load_ccds_lengths(str(path))
-
-        # add this info to the main ccds length map
-        ccds_length_map = (
-            ccds_length_map
-            | v19_ccds_length_map
-            | vhs373_ccds_length_map
-            | vhs371_ccds_length_map
-        )
+        load_ccds_lengths(str(path), ccds_length_map)
 
     return ccds_length_map
 
@@ -487,6 +496,56 @@ def load_mane_map():
         mane_map[symbol] = data
 
     return mane_map
+
+
+def sort_v6(transcripts: list[dict]) -> None:
+    transcripts.sort(
+        key=lambda t: (
+            # protein changes should come first
+            not t["has_protein_change"],
+            # pick the one with most severe consequence
+            t["severity_rank"],
+            # if has hugo symbol, more likely to be primary
+            not t["is_hugo_gene"],
+            # if protein coding, more likely to be primary
+            not t["is_protein_coding"],
+            # if has ccds, more likely to be primary
+            not t["has_ccds"],
+            # if has mane, more likely to be primary
+            not t["has_mane"],
+            # if canonical, more likely to be primary
+            not t["is_canonical"],
+            # if nothing else try longest CCDS length, as a proxy for most complete transcript
+            -t["ccds_aa_length"],
+        )
+    )
+
+
+def sort_v7(transcripts: list[dict]) -> None:
+    """
+    Prioritize any mutation in CCDS even if no protein change,
+    as these are more likely to be relevant for our analysis, and then sort by severity etc.
+    """
+    transcripts.sort(
+        key=lambda t: (
+            # if has ccds, more likely to be primary
+            not t["has_ccds"],
+            # protein changes should come first
+            not t["has_protein_change"],
+            # pick the one with most severe consequence
+            t["severity_rank"],
+            # if has hugo symbol, more likely to be primary
+            not t["is_hugo_gene"],
+            # if protein coding, more likely to be primary
+            not t["is_protein_coding"],
+            # if has mane, more likely to be primary
+            not t["has_mane"],
+            # if canonical, more likely to be primary
+            not t["is_canonical"],
+            # if nothing else try longest CCDS length, as a proxy for most complete transcript
+            -t["ccds_aa_length"],
+        )
+    )
 
 
 class VEPAnnotation:
@@ -607,28 +666,8 @@ class VEPAnnotation:
                 # and if multiple ccds, then the longest one, as a proxy for most complete annotation.
                 # Also want to prioritize transcripts with protein changes and with hugo symbols,
                 # as these are more likely to be relevant for our analysis
-                transcripts.sort(
-                    key=lambda t: (
-                        # if has hugo symbol, more likely to be primary
-                        not t["is_hugo_gene"],
-                        # if protein coding, more likely to be primary
-                        not t["is_protein_coding"],
-                        # if has ccds, more likely to be primary
-                        not t["has_ccds"],
-                        # if has mane, more likely to be primary
-                        not t["has_mane"],
-                        # if canonical, more likely to be primary
-                        not t["is_canonical"],
-                        # if nothing else try longest CCDS length, as a proxy for most complete transcript
-                        -t["ccds_aa_length"],
-                        # protein changes should come first
-                        not t["has_protein_change"],
-                        # nonsense mutations should come first
-                        not t["is_nonsense"],
-                        # pick the one with most severe consequence
-                        t["severity_rank"],
-                    )
-                )
+                # sort_v6(transcripts)
+                sort_v7(transcripts)
 
                 for ti, transcript in enumerate(transcripts):
                     transcript_id = transcript.get("Feature", NA)
@@ -663,6 +702,7 @@ class VEPAnnotation:
                         "biotype": blank_val(transcript["biotype"]),
                         "consequence": blank_val(consequences),
                         "severity": blank_val(transcript["severity_rank"]),
+                        "impact": blank_val(transcript["severity_impact"]),
                         "hgvsp": blank_val(transcript["hgvsp"]),
                         "hgvsc": blank_val(transcript["hgvsc"]),
                         "ccds": blank_val(transcript["ccds"]),
@@ -749,6 +789,7 @@ class VEPAnnotation:
             df["VEP_HGVSc"] = NA
             df["VEP_Variant_Classification"] = NA
             df["VEP_Variant_Severity"] = NA
+            df["VEP_Variant_Impact"] = NA
             df["VEP_Transcript"] = NA
             df["VEP_Exon"] = NA
             df["VEP_Total_Exons"] = NA
@@ -766,6 +807,7 @@ class VEPAnnotation:
             df["VEP_Secondary_HGVSc"] = NA
             df["VEP_Secondary_Variant_Classification"] = NA
             df["VEP_Secondary_Variant_Severity"] = NA
+            df["VEP_Secondary_Variant_Impact"] = NA
             df["VEP_Secondary_Transcript"] = NA
             df["VEP_Secondary_Exon"] = NA
             df["VEP_Secondary_Total_Exons"] = NA
@@ -800,6 +842,7 @@ class VEPAnnotation:
                     df.at[i, "VEP_HGVSc"] = annotation["hgvsc"]
                     df.at[i, "VEP_Variant_Classification"] = annotation["consequence"]
                     df.at[i, "VEP_Variant_Severity"] = annotation["severity"]
+                    df.at[i, "VEP_Variant_Impact"] = annotation["impact"]
                     df.at[i, "VEP_Transcript"] = transcript_id
                     df.at[i, "VEP_Exon"] = annotation["exon"]
                     df.at[i, "VEP_Total_Exons"] = annotation["exons"]
@@ -852,6 +895,9 @@ class VEPAnnotation:
                     df.at[i, "VEP_Secondary_HGVSc"] = hgvscs
                     df.at[i, "VEP_Secondary_Variant_Classification"] = consequences
                     df.at[i, "VEP_Secondary_Variant_Severity"] = severities
+                    df.at[i, "VEP_Secondary_Variant_Impact"] = SEP.join(
+                        [a["impact"] for a in annotations]
+                    )
                     df.at[i, "VEP_Secondary_Transcript"] = transcript_ids
                     df.at[i, "VEP_Secondary_Exon"] = exons
                     df.at[i, "VEP_Secondary_Total_Exons"] = exons_total

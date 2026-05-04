@@ -185,7 +185,7 @@ def load_transcripts(file: str, transcript_map) -> dict[str, dict]:
 #     return transcript_map
 
 
-def load_ccds_lengths(file: str) -> dict[str, dict]:
+def load_ccds_lengths(file: str, ccds_length_map: dict[str, dict]):
     """
     Load CCDS lengths from file from NCBI CCDS project,
     using the protein lengths so we don't need to calculate
@@ -198,16 +198,18 @@ def load_ccds_lengths(file: str) -> dict[str, dict]:
     df = df[df["aa_length"] != -1]
     print(f"{len(df)} CCDS entries with valid aa_length")
 
-    ccds_length_map = {}
-
     for _, row in df.iterrows():
         # strip version from ccds_id if exists
         ccds = row["ccds_id"].split(".")[0]
         aa_length = row["aa_length"]
 
-        ccds_length_map[ccds] = {
-            "aa_length": aa_length,
-        }
+        if ccds not in ccds_length_map:
+            ccds_length_map[ccds] = {
+                "aa_length": aa_length,
+            }
+
+        if aa_length > ccds_length_map[ccds]["aa_length"]:
+            ccds_length_map[ccds]["aa_length"] = aa_length
 
     # print(ccds_length_map)
 
