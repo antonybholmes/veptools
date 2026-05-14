@@ -11,6 +11,9 @@ from openpyxl.styles import Font
 SEP = "|"
 NA = "."
 
+# all possible columns in the desired order, with some renamed columns
+# some columns may not exist or be ignored, but it should preserve
+# order as best as possible for the columns that do exist
 COLUMNS = [
     "VEP_Gene_Symbol",
     "VEP_Is_Hugo_Gene",
@@ -40,8 +43,9 @@ COLUMNS = [
     "VEP_Is_Canonical",
     "MANE_RefSeq",
     "MANE_status",
-    "VEP_Variant_Severity",
+    "dbSNP_RSID",
     "VEP_Variant_Impact",
+    "VEP_Variant_Severity",
     "Hugo_Symbol (Rahul - not really Hugo)",
     "Variant_Classification",
     "Protein_Change",
