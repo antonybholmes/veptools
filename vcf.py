@@ -1,8 +1,10 @@
+import gzip
 import os
 
 import gal
 import libdna
 
+from reorder import SEP
 from veptools import utils
 
 ASSEMBLY = "hg19"
@@ -214,3 +216,62 @@ class VCFMaker:
         )
 
         print("running", total)
+
+
+def extract_vcf_info_fields(
+    vcf_file: str,
+) -> tuple[list[str], dict[str, dict[str, str]]]:
+    """
+    Extract INFO field definitions from a VCF file and return a list of
+    INFO field ids and a mapping from id to its definition
+    (number, type, description).
+    """
+
+    if not os.path.exists(vcf_file):
+        raise FileNotFoundError(f"VCF file {vcf_file} does not exist")
+
+    if vcf_file.endswith(".gz"):
+        open_func = gzip.open(vcf_file, "rt")
+    else:
+        open_func = open(vcf_file, "r")
+
+    ret = []
+
+    with open_func as f:
+        for line in f:
+            if not line.startswith("##"):
+                break
+
+            if line.startswith("##INFO="):
+                # extract id, number, type, description
+                id = None
+                number = None
+                type = None
+                description = None
+                tokens = line.strip().split("=", 1)[1].strip("<>").split(",")
+                for token in tokens:
+                    key, value = token.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"')
+                    if key == "ID":
+                        id = value
+                    elif key == "Number":
+                        number = value
+                    elif key == "Type":
+                        type = value
+                    elif key == "Description":
+                        description = value
+
+                if id is not None:
+                    ret.append(
+                        {
+                            "id": id,
+                            "number": number,
+                            "type": type,
+                            "description": description,
+                        }
+                    )
+
+    field_map = {field["id"]: field for field in ret}
+
+    return ret, field_map

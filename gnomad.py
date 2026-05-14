@@ -14,12 +14,24 @@ from .utils import NA
 DBSNP_COL = "dbSNP_RSID"
 
 
-class DBSNPAnnotator:
+class GnomadAnnotator:
     def __init__(self, vcf: str):
+        """
+        Annotate a MAF file with gnomAD annotations from a VCF file.
+        The VCF file should have been preprocessed to have an ID field in the INFO column
+        that matches the format "chr_pos_ref/alt" for exact matching.
+        Arguments:
+            vcf:    path to the matching VCF that had gnomAD annotations added to it
+                    (can be gzipped). This is not the original gnomAD VCF.
+        """
         self._vcf = vcf
         self._rsmap = {}
 
     def _load(self):
+        """
+        Lazy load the VCF file and build a mapping from the ID field to the gnomAD annotations.
+        The ID field should be in the format "chr_pos_ref/alt" for exact matching.
+        """
         if len(self._rsmap) > 0:
             return
 
@@ -32,13 +44,17 @@ class DBSNPAnnotator:
                 if line.startswith("#"):
                     continue
                 fields = line.strip().split("\t")
-                chrom = fields[0]
-                pos = int(fields[1])
+                # chrom = fields[0]
+                # pos = int(fields[1])
                 rsid = fields[2]
-                ref = fields[3]
-                alt = fields[4]
+                # ref = fields[3]
+                # alt = fields[4]
                 info = fields[7]
-                id = info.split("=")[1] if "=" in info else ""
+
+                # will contain VEP_ID=, plus gnomAD annotations like gnomAD_AF=, gnomAD_AFR_AF=, etc.
+                info_tokens = info.split(";")
+
+                id = info_tokens[0].split("=")[1] if "=" in info_tokens[0] else ""
 
                 if id == "" or not rsid.startswith("rs"):
                     continue
