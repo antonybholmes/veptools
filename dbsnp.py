@@ -13,8 +13,6 @@ import pandas as pd
 from .vcf import vcf_record_info_fields
 from .utils import NA
 
-DBSNP_COL = "dbSNP_RSID"
-
 DBSNP_COLS = [
     {"id": "RS", "header": "dbSNP_RSID"},  # dbSNP RSID
 ]
@@ -45,6 +43,8 @@ class DBSNPAnnotator:
 
                 id = data.get("VEP_ID", "")
 
+                # print(id, data)
+
                 if id == "":
                     continue
 
@@ -68,7 +68,8 @@ class DBSNPAnnotator:
             print(f"Processing chunk {chunk}...")
             chunk += 1
 
-            df[DBSNP_COL] = NA
+            for c in DBSNP_COLS:
+                df[c["header"]] = NA
 
             for index, row in df.iterrows():
                 pc += 1
@@ -85,9 +86,13 @@ class DBSNPAnnotator:
                 id = f"{chr}_{start}_{ref}/{alt}"
 
                 for c in DBSNP_COLS:
-                    df.at[index, c["header"]] = self._dbsnp_map.get(id, {}).get(
-                        c["id"], NA
-                    )
+                    v = self._dbsnp_map.get(id, {}).get(c["id"], NA)
+
+                    # prefix with "rs" if it's an RSID and doesn't already start with "rs"
+                    if c["id"] == "RS" and v != NA and not str(v).startswith("rs"):
+                        v = f"rs{v}"
+
+                    df.at[index, c["header"]] = v
 
             print(f"Processed {pc} splice site variants")
 
