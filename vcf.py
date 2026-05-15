@@ -233,7 +233,7 @@ def find_vcf_header_line(vcf_file: str) -> int:
     return -1
 
 
-def extract_vcf_info_fields(
+def vcf_info_fields(
     vcf_file: str,
 ) -> tuple[list[str], dict[str, dict[str, str]]]:
     """
@@ -259,7 +259,7 @@ def extract_vcf_info_fields(
 
             if line.startswith("##INFO="):
                 # extract id, number, type, description
-                id = None
+                id = ""
                 number = ""
                 type = ""
                 description = ""
@@ -277,7 +277,7 @@ def extract_vcf_info_fields(
                     elif key == "Description":
                         description = value
 
-                if id is not None:
+                if id != "":
                     ret.append(
                         {
                             "id": id,
@@ -290,3 +290,20 @@ def extract_vcf_info_fields(
     field_map = {field["id"]: field for field in ret}
 
     return ret, field_map
+
+
+def vcf_record_info_fields(record_info: str) -> dict[str, str]:
+    """
+    Parse the INFO field of a VCF record and return a mapping from field id to value.
+    """
+    ret = {}
+    tokens = record_info.split(";")
+    for token in tokens:
+        key_value = token.split("=", 1)
+        if len(key_value) != 2:
+            continue
+        key, value = key_value
+        key = key.strip()
+        value = value.strip().strip('"')
+        ret[key] = value
+    return ret

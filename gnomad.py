@@ -10,10 +10,14 @@ Created on Thu Jun 26 10:35:40 2014
 import gzip
 import pandas as pd
 
-from .vcf import extract_vcf_info_fields
+from .vcf import vcf_info_fields, vcf_record_info_fields
 from .utils import NA
 
-DBSNP_COL = "dbSNP_RSID"
+GNOMAD_COLS = [
+    {"id": "AF", "header": "gnomAD_AF"},  # Allele frequency in samples
+    {"id": "AC", "header": "gnomAD_AC"},  # Allele count in samples
+    {"id": "AN", "header": "gnomAD_AN"},  # Total number of alleles in samples
+]
 
 
 class GnomadAnnotator:
@@ -27,20 +31,21 @@ class GnomadAnnotator:
                     (can be gzipped). This is not the original gnomAD VCF.
         """
         self._vcf = vcf
-        self._rsmap = {}
+        self._gnomad_map = {}
 
     def _load(self):
         """
         Lazy load the VCF file and build a mapping from the ID field to the gnomAD annotations.
         The ID field should be in the format "chr_pos_ref/alt" for exact matching.
         """
-        if len(self._rsmap) > 0:
+        if len(self._gnomad_map) > 0:
             return
 
-        info_fields, info_field_map = extract_vcf_info_fields(self._vcf)
+        info_fields, _ = vcf_info_fields(self._vcf)
+
+        # index_field_map = {i: field for i, field in enumerate(info_fields)}
 
         print(info_fields)
-        exit(0)
 
         if self._vcf.endswith(".gz"):
             open_func = gzip.open(self._vcf, "rt")
@@ -53,22 +58,19 @@ class GnomadAnnotator:
                     continue
 
                 fields = line.strip().split("\t")
-                # chrom = fields[0]
-                # pos = int(fields[1])
-                rsid = fields[2]
-                # ref = fields[3]
-                # alt = fields[4]
                 info = fields[7]
 
                 # will contain VEP_ID=, plus gnomAD annotations like gnomAD_AF=, gnomAD_AFR_AF=, etc.
-                info_tokens = info.split(";")
+                # info_tokens = info.split(";")
 
-                id = info_tokens[0].split("=")[1] if "=" in info_tokens[0] else ""
+                data = vcf_record_info_fields(info)
 
-                if id == "" or not rsid.startswith("rs"):
+                id = data.get("VEP_ID", "")
+
+                if id == "":
                     continue
 
-                self._rsmap[id] = rsid
+                self._gnomad_map[id] = data
 
     def annotate(self, fin: str, fout: str, chunksize: int = 200000):
 
@@ -88,7 +90,8 @@ class GnomadAnnotator:
             print(f"Processing chunk {chunk}...")
             chunk += 1
 
-            df[DBSNP_COL] = NA
+            for c in GNOMAD_COLS:
+                df[c["header"]] = NA
 
             for index, row in df.iterrows():
                 pc += 1
@@ -104,8 +107,10 @@ class GnomadAnnotator:
                 # exact
                 id = f"{chr}_{start}_{ref}/{alt}"
 
-                if id in self._rsmap:
-                    df.at[index, DBSNP_COL] = self._rsmap[id]
+                for c in GNOMAD_COLS:
+                    df.at[index, c["header"]] = self._gnomad_map.get(id, {}).get(
+                        c["id"], NA
+                    )
 
             print(f"Processed {pc} splice site variants")
 

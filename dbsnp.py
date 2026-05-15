@@ -9,18 +9,24 @@ Created on Thu Jun 26 10:35:40 2014
 
 import gzip
 import pandas as pd
+
+from .vcf import vcf_record_info_fields
 from .utils import NA
 
 DBSNP_COL = "dbSNP_RSID"
+
+DBSNP_COLS = [
+    {"id": "RS", "header": "dbSNP_RSID"},  # dbSNP RSID
+]
 
 
 class DBSNPAnnotator:
     def __init__(self, vcf: str):
         self._vcf = vcf
-        self._rsmap = {}
+        self._dbsnp_map = {}
 
     def _load(self):
-        if len(self._rsmap) > 0:
+        if len(self._dbsnp_map) > 0:
             return
 
         if self._vcf.endswith(".gz"):
@@ -32,18 +38,17 @@ class DBSNPAnnotator:
                 if line.startswith("#"):
                     continue
                 fields = line.strip().split("\t")
-                chrom = fields[0]
-                pos = int(fields[1])
-                rsid = fields[2]
-                ref = fields[3]
-                alt = fields[4]
-                info = fields[7]
-                id = info.split("=")[1] if "=" in info else ""
 
-                if id == "" or not rsid.startswith("rs"):
+                info = fields[7]
+
+                data = vcf_record_info_fields(info)
+
+                id = data.get("VEP_ID", "")
+
+                if id == "":
                     continue
 
-                self._rsmap[id] = rsid
+                self._dbsnp_map[id] = data
 
     def annotate(self, fin: str, fout: str, chunksize: int = 200000):
 
@@ -79,8 +84,10 @@ class DBSNPAnnotator:
                 # exact
                 id = f"{chr}_{start}_{ref}/{alt}"
 
-                if id in self._rsmap:
-                    df.at[index, DBSNP_COL] = self._rsmap[id]
+                for c in DBSNP_COLS:
+                    df.at[index, c["header"]] = self._dbsnp_map.get(id, {}).get(
+                        c["id"], NA
+                    )
 
             print(f"Processed {pc} splice site variants")
 
