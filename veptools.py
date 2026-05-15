@@ -12,6 +12,7 @@ from .utils import (
     NA,
     SEP,
 )
+from .vcf import find_vcf_header_line
 
 import pandas as pd
 
@@ -156,14 +157,6 @@ def extract_csq_header(vcf_file: str) -> tuple[list[str], dict[str, int]]:
                 break
 
     return fields, {field: i for i, field in enumerate(fields)}
-
-
-def find_vcf_header_line(vcf_file: str) -> int:
-    with open(vcf_file) as f:
-        for i, line in enumerate(f):
-            if line.startswith("#CHROM"):
-                return i
-    return -1
 
 
 def format_hgvs(hgvs: str) -> str:

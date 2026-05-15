@@ -8,9 +8,6 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font
 
-SEP = "|"
-NA = "."
-
 # all possible columns in the desired order, with some renamed columns
 # some columns may not exist or be ignored, but it should preserve
 # order as best as possible for the columns that do exist

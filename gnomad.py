@@ -9,6 +9,8 @@ Created on Thu Jun 26 10:35:40 2014
 
 import gzip
 import pandas as pd
+
+from .vcf import extract_vcf_info_fields
 from .utils import NA
 
 DBSNP_COL = "dbSNP_RSID"
@@ -35,14 +37,21 @@ class GnomadAnnotator:
         if len(self._rsmap) > 0:
             return
 
+        info_fields, info_field_map = extract_vcf_info_fields(self._vcf)
+
+        print(info_fields)
+        exit(0)
+
         if self._vcf.endswith(".gz"):
             open_func = gzip.open(self._vcf, "rt")
         else:
             open_func = open(self._vcf, "r")
+
         with open_func as f:
             for line in f:
                 if line.startswith("#"):
                     continue
+
                 fields = line.strip().split("\t")
                 # chrom = fields[0]
                 # pos = int(fields[1])

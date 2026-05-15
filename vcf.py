@@ -3,8 +3,6 @@ import os
 
 import gal
 import libdna
-
-from reorder import SEP
 from veptools import utils
 
 ASSEMBLY = "hg19"
@@ -218,6 +216,23 @@ class VCFMaker:
         print("running", total)
 
 
+def find_vcf_header_line(vcf_file: str) -> int:
+    """
+    Find the line number of the VCF header line (the line that starts with #CHROM).
+    Returns -1 if not found.
+    """
+    if vcf_file.endswith(".gz"):
+        open_func = gzip.open(vcf_file, "rt")
+    else:
+        open_func = open(vcf_file, "r")
+
+    with open_func as f:
+        for i, line in enumerate(f):
+            if line.startswith("#CHROM"):
+                return i
+    return -1
+
+
 def extract_vcf_info_fields(
     vcf_file: str,
 ) -> tuple[list[str], dict[str, dict[str, str]]]:
@@ -245,9 +260,9 @@ def extract_vcf_info_fields(
             if line.startswith("##INFO="):
                 # extract id, number, type, description
                 id = None
-                number = None
-                type = None
-                description = None
+                number = ""
+                type = ""
+                description = ""
                 tokens = line.strip().split("=", 1)[1].strip("<>").split(",")
                 for token in tokens:
                     key, value = token.split("=", 1)
